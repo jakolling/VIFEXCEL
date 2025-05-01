@@ -4,6 +4,7 @@ import pandas as pd
 import base64
 from io import BytesIO
 from thefuzz import fuzz, process
+from collections import deque
 
 def to_excel(df):
     output = BytesIO()
@@ -52,6 +53,8 @@ if 'page_number' not in st.session_state:
     st.session_state.page_number = 0
 if 'auto_matched' not in st.session_state:
     st.session_state.auto_matched = False
+if 'match_history' not in st.session_state:
+    st.session_state.match_history = deque(maxlen=10)
 
 if all([wyscout_file, physical_file, overcome_file]):
     if wyscout_file.name.endswith('.csv'):
@@ -74,8 +77,10 @@ if all([wyscout_file, physical_file, overcome_file]):
         overcome_df['Player'].dropna()
     ]).unique().tolist()
     
+    # Filter out both rejected and confirmed players
     wyscout_players = [p for p in wyscout_df['Player'].dropna().unique() 
-                      if p not in st.session_state.rejected_players]
+                      if p not in st.session_state.rejected_players and 
+                      p not in st.session_state.confirmed_matches]
 
     if not st.session_state.auto_matched:
         for player in wyscout_players:
@@ -149,7 +154,9 @@ if all([wyscout_file, physical_file, overcome_file]):
             with cols[2]:
                 if st.button("✓", key=f"confirm_{player}", help="Confirm match"):
                     if selection and selection != "-- None --":
+                        st.session_state.match_history.append(('confirm', player, selection))
                         st.session_state.confirmed_matches[player] = selection
+                        st.experimental_rerun()
             
             with cols[3]:
                 if st.button("✗", key=f"reject_{player}", help="Reject player"):
@@ -157,7 +164,9 @@ if all([wyscout_file, physical_file, overcome_file]):
                         del st.session_state.confirmed_matches[player]
                     if player in st.session_state.temp_selections:
                         del st.session_state.temp_selections[player]
+                    st.session_state.match_history.append(('reject', player, None))
                     st.session_state.rejected_players.add(player)
+                    st.experimental_rerun()
 
     st.markdown("---")
     col1, col2 = st.columns([2,1])
@@ -175,11 +184,26 @@ if all([wyscout_file, physical_file, overcome_file]):
     
     with col2:
         st.write("### Actions")
-        if st.button("🔄 Reset All", help="Clear all matches and start over"):
-            st.session_state.temp_selections = {}
-            st.session_state.confirmed_matches = {}
-            st.session_state.auto_matched = False
-            st.session_state.rejected_players = set()
+        col_actions1, col_actions2 = st.columns(2)
+        
+        with col_actions1:
+            if st.button("🔄 Reset All", help="Clear all matches and start over"):
+                st.session_state.temp_selections = {}
+                st.session_state.confirmed_matches = {}
+                st.session_state.auto_matched = False
+                st.session_state.rejected_players = set()
+                st.session_state.match_history.clear()
+                st.experimental_rerun()
+        
+        with col_actions2:
+            if st.button("↩️ Undo Last", help="Undo last match", disabled=len(st.session_state.match_history) == 0):
+                if st.session_state.match_history:
+                    action, player, match = st.session_state.match_history.pop()
+                    if action == 'confirm':
+                        del st.session_state.confirmed_matches[player]
+                    elif action == 'reject':
+                        st.session_state.rejected_players.remove(player)
+                    st.experimental_rerun()
         
         if st.button("📥 Export Data", help="Download matched data as Excel"):
             wyscout_df['Matched_Player'] = wyscout_df['Player'].map(st.session_state.confirmed_matches)
@@ -213,6 +237,12 @@ if all([wyscout_file, physical_file, overcome_file]):
         progress = len(st.session_state.confirmed_matches) / len(wyscout_df['Player'].dropna().unique())
         st.progress(progress)
         st.write(f"Matched: {len(st.session_state.confirmed_matches)} of {len(wyscout_df['Player'].dropna().unique())} players")
+
+        st.write("### Rejected Players")
+        if st.session_state.rejected_players:
+            st.write(f"Total rejected: {len(st.session_state.rejected_players)}")
+            if st.button("Show Rejected"):
+                st.write(sorted(list(st.session_state.rejected_players)))
 else:
     st.info("Please upload all required files to begin matching")
 ''')
