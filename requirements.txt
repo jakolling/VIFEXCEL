@@ -6,3 +6,4 @@ fuzzywuzzy
 unidecode
 thefuzz
 xlsxwriter
+python-Levenshtein
