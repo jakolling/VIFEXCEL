@@ -1,6 +1,4 @@
-streamlit  
-pandas  
-openpyxl  
-numpy  
-unidecode
-fuzzywuzzy
+streamlit==1.17.0
+pandas==1.5.3
+openpyxl==3.0.10
+xlrd==1.2.0
