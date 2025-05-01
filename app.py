@@ -1,4 +1,4 @@
-# Save the Streamlit app code to app.py
+# Save updated Streamlit app code with fixed unidecode call
 with open('app.py', 'w') as f:
     f.write("""import streamlit as st
 import pandas as pd
@@ -12,7 +12,7 @@ st.set_page_config(page_title="Data Merger", layout="wide")
 def normalize_name(name):
     if not isinstance(name, str):
         return ''
-    name = unidecode(str(name)).lower()
+    name = unidecode.unidecode(str(name)).lower()
     name = re.sub(r'[^a-z0-9\s]', '', name)
     name = re.sub(r'\s+', ' ', name)
     return name.strip()
@@ -77,10 +77,16 @@ if 'selected_physical_cols' not in st.session_state:
     st.session_state.selected_physical_cols = []
 if 'selected_pressure_cols' not in st.session_state:
     st.session_state.selected_pressure_cols = []
-if 'show_physical_popup' not in st.session_state:
-    st.session_state.show_physical_popup = False
-if 'show_pressure_popup' not in st.session_state:
-    st.session_state.show_pressure_popup = False
+if 'physical_popup' not in st.session_state:
+    st.session_state.physical_popup = False
+if 'pressure_popup' not in st.session_state:
+    st.session_state.pressure_popup = False
+
+def toggle_physical_popup():
+    st.session_state.physical_popup = not st.session_state.physical_popup
+
+def toggle_pressure_popup():
+    st.session_state.pressure_popup = not st.session_state.pressure_popup
 
 col1, col2, col3 = st.columns(3)
 
@@ -99,78 +105,58 @@ if all([uploaded_wyscout, uploaded_physical, uploaded_pressure]):
     col1, col2 = st.columns(2)
     
     with col1:
-        if st.button("Select Physical Columns"):
-            st.session_state.show_physical_popup = True
+        if st.button("Select Physical Columns", on_click=toggle_physical_popup):
+            pass
             
     with col2:
-        if st.button("Select Pressure Columns"):
-            st.session_state.show_pressure_popup = True
+        if st.button("Select Pressure Columns", on_click=toggle_pressure_popup):
+            pass
 
-    if st.session_state.show_physical_popup:
+    if st.session_state.physical_popup:
         with st.container():
             st.subheader("Select Physical Data Columns")
             physical_columns = [col for col in df_physical.columns if col != "Player"]
             
-            cols = st.columns(3)
-            columns_per_col = len(physical_columns) // 3 + 1
-            
-            temp_selected = st.session_state.selected_physical_cols.copy()
-            
             if st.checkbox("Select All Physical", value=len(st.session_state.selected_physical_cols) == len(physical_columns)):
-                temp_selected = physical_columns.copy()
+                st.session_state.selected_physical_cols = physical_columns.copy()
+            else:
+                cols = st.columns(3)
+                columns_per_col = len(physical_columns) // 3 + 1
+                
+                for i, col in enumerate(physical_columns):
+                    col_idx = i // columns_per_col
+                    with cols[col_idx]:
+                        if st.checkbox(col, value=col in st.session_state.selected_physical_cols, key=f"phys_{col}"):
+                            if col not in st.session_state.selected_physical_cols:
+                                st.session_state.selected_physical_cols.append(col)
+                        elif col in st.session_state.selected_physical_cols:
+                            st.session_state.selected_physical_cols.remove(col)
             
-            for i, col in enumerate(physical_columns):
-                col_idx = i // columns_per_col
-                with cols[col_idx]:
-                    if st.checkbox(col, value=col in temp_selected, key=f"phys_{col}"):
-                        if col not in temp_selected:
-                            temp_selected.append(col)
-                    elif col in temp_selected:
-                        temp_selected.remove(col)
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button("Apply Physical"):
-                    st.session_state.selected_physical_cols = temp_selected
-                    st.session_state.show_physical_popup = False
-                    st.experimental_rerun()
-            with col2:
-                if st.button("Cancel Physical"):
-                    st.session_state.show_physical_popup = False
-                    st.experimental_rerun()
+            if st.button("Close Physical Selection"):
+                st.session_state.physical_popup = False
 
-    if st.session_state.show_pressure_popup:
+    if st.session_state.pressure_popup:
         with st.container():
             st.subheader("Select Pressure Data Columns")
             pressure_columns = [col for col in df_pressure.columns if col != "Player"]
             
-            cols = st.columns(3)
-            columns_per_col = len(pressure_columns) // 3 + 1
-            
-            temp_selected = st.session_state.selected_pressure_cols.copy()
-            
             if st.checkbox("Select All Pressure", value=len(st.session_state.selected_pressure_cols) == len(pressure_columns)):
-                temp_selected = pressure_columns.copy()
+                st.session_state.selected_pressure_cols = pressure_columns.copy()
+            else:
+                cols = st.columns(3)
+                columns_per_col = len(pressure_columns) // 3 + 1
+                
+                for i, col in enumerate(pressure_columns):
+                    col_idx = i // columns_per_col
+                    with cols[col_idx]:
+                        if st.checkbox(col, value=col in st.session_state.selected_pressure_cols, key=f"pres_{col}"):
+                            if col not in st.session_state.selected_pressure_cols:
+                                st.session_state.selected_pressure_cols.append(col)
+                        elif col in st.session_state.selected_pressure_cols:
+                            st.session_state.selected_pressure_cols.remove(col)
             
-            for i, col in enumerate(pressure_columns):
-                col_idx = i // columns_per_col
-                with cols[col_idx]:
-                    if st.checkbox(col, value=col in temp_selected, key=f"pres_{col}"):
-                        if col not in temp_selected:
-                            temp_selected.append(col)
-                    elif col in temp_selected:
-                        temp_selected.remove(col)
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button("Apply Pressure"):
-                    st.session_state.selected_pressure_cols = temp_selected
-                    st.session_state.show_pressure_popup = False
-                    st.experimental_rerun()
-            with col2:
-                if st.button("Cancel Pressure"):
-                    st.session_state.show_pressure_popup = False
-                    st.experimental_rerun()
+            if st.button("Close Pressure Selection"):
+                st.session_state.pressure_popup = False
 
     st.write("Selected Physical Columns:", st.session_state.selected_physical_cols)
     st.write("Selected Pressure Columns:", st.session_state.selected_pressure_cols)
@@ -248,4 +234,4 @@ else:
     st.info("👆 Please upload all three Excel files")
 """)
 
-print("Streamlit app code has been saved to app.py")
+print("Updated Streamlit app code with fixed unidecode call has been saved to app.py")
