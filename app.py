@@ -5,6 +5,8 @@ import hashlib
 import unicodedata
 from difflib import SequenceMatcher
 
+streamlit run app.py
+
 def preprocess_name(name):
     name = unicodedata.normalize('NFKD', name).encode('ASCII', 'ignore').decode('ASCII')
     name = name.lower().strip()
