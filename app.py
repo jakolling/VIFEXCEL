@@ -1,110 +1,119 @@
 import streamlit as st  
 import pandas as pd  
 from io import BytesIO  
-from difflib import SequenceMatcher  
   
-# Função para calcular similaridade entre nomes  
-def name_similarity(a, b):  
-    return SequenceMatcher(None, a.lower(), b.lower()).ratio()  
+def process_mismatches(df_wyscout, df_skillcorner):  
+    merged = pd.merge(df_wyscout, df_skillcorner, on="Player", how="outer", indicator=True)  
+    wyscout_only = merged[merged["_merge"] == "left_only"]["Player"].tolist()  
+    skill_only = merged[merged["_merge"] == "right_only"]["Player"].tolist()  
+    return wyscout_only, skill_only  
   
-# Função para encontrar o melhor match, com threshold default de 0.7  
-def find_best_match(name, candidates, threshold=0.7):  
-    matches = [(c, name_similarity(name, c)) for c in candidates]  
-    best_match = max(matches, key=lambda x: x[1])  
-    return best_match[0] if best_match[1] >= threshold else None  
-  
-# Interface para selecção manual dos matches que não foram encontrados automaticamente  
-def manual_link_interface(mismatched_players, wyscout_players):  
+def manual_link_interface(wyscout_players, skillcorner_players):  
     st.subheader("Resolver Mismatches")  
-    manual_links = {}  
-    options = [""] + wyscout_players  
-    for idx, skill_player in enumerate(mismatched_players):  
-        manual_choice = st.selectbox(  
-            f"Match para {skill_player}",  
-            options=options,  
-            key=f"match_{idx}"  
-        )  
-        if manual_choice != "":  
-            manual_links[skill_player] = manual_choice  
-    return manual_links  
+    links = {}  
+    players_to_exclude = []  
+      
+    for wyscout_player in wyscout_players:  
+        col1, col2, col3 = st.columns([2, 2, 1])  
+          
+        with col1:  
+            st.write(f"WyScout: {wyscout_player}")  
+              
+        with col2:  
+            skill_player = st.selectbox(  
+                "Linkar com jogador do SkillCorner",  
+                ["Selecione um jogador"] + skillcorner_players,  
+                key=f"link_{wyscout_player}"  
+            )  
+              
+        with col3:  
+            exclude = st.checkbox("Excluir", key=f"exclude_{wyscout_player}")  
+          
+        if skill_player != "Selecione um jogador":  
+            links[wyscout_player] = skill_player  
+        if exclude:  
+            players_to_exclude.append(wyscout_player)  
+              
+    return links, players_to_exclude  
   
 def main():  
-    st.title("Merge de Métricas de Performance")  
+    st.set_page_config(page_title="Merge WyScout & SkillCorner", layout="wide")  
+    st.title("Mesclador WyScout & SkillCorner com Resolução Manual")  
       
-    # Upload dos arquivos  
-    wyscout_file = st.file_uploader("Arquivo WyScout", type=['csv', 'xlsx'])  
-    skillcorner_file = st.file_uploader("Arquivo SkillCorner", type=['csv', 'xlsx'])  
+    st.sidebar.title("Instruções")  
+    st.sidebar.write("""  
+    1. Faça upload dos arquivos Excel do WyScout e SkillCorner.  
+    2. O app identificará automaticamente os mismatches.  
+    3. Resolva os mismatches manualmente usando a interface.  
+    4. Baixe o arquivo Excel mesclado final.  
+    """)  
       
-    if not wyscout_file and not skillcorner_file:  
-        st.info("Utilizando conjuntos de dados de exemplo")  
-        data_wyscout = {  
-            "Player": ["João", "Maria", "Carlos"],  
-            "Goals": [2, 1, 0],  
-            "Assists": [0, 1, 0],  
-            "player_id": [101, 102, 103],  
-            "Minutes": [90, 85, 80]  
-        }  
-        data_skillcorner = {  
-            "Player": ["João", "Maria", "Pedro"],  
-            "Passes": [30, 20, 25],  
-            "Tackles": [5, 2, 3],  
-            "Minutes": [90, 85, 80],  
-            "player_id": [101, 102, 104]  
-        }  
-        df_wyscout = pd.DataFrame(data_wyscout)  
-        df_skillcorner = pd.DataFrame(data_skillcorner)  
-    else:  
-        try:  
-            df_wyscout = pd.read_csv(wyscout_file) if wyscout_file.name.endswith('.csv') else pd.read_excel(wyscout_file)  
-            df_skillcorner = pd.read_csv(skillcorner_file) if skillcorner_file.name.endswith('.csv') else pd.read_excel(skillcorner_file)  
-        except Exception as e:  
-            st.error("Erro ao carregar os arquivos: " + str(e))  
-            return  
+    wyscout_file = st.file_uploader("Database WyScout", type=["xlsx"])  
+    physical_file = st.file_uploader("SkillCorner Physical Output", type=["xlsx"])  
+    pressure_file = st.file_uploader("SkillCorner Overcome Pressure", type=["xlsx"])  
   
-    # Processo de matching dos jogadores  
-    wyscout_players = df_wyscout["Player"].tolist()  
-    skillcorner_players = df_skillcorner["Player"].unique().tolist()  
-      
-    automatic_matches = {}  
-    mismatches = []  
-    for skill_player in skillcorner_players:  
-        match = find_best_match(skill_player, wyscout_players)  
-        if match:  
-            automatic_matches[skill_player] = match  
-        else:  
-            mismatches.append(skill_player)  
-      
-    if mismatches:  
-        manual_matches = manual_link_interface(mismatches, wyscout_players)  
-        all_matches = {**automatic_matches, **manual_matches}  
-    else:  
-        all_matches = automatic_matches  
-      
-    if st.button("Gerar Excel"):  
-        # Mapear os nomes do SkillCorner para os nomes encontrados no WyScout  
-        df_skillcorner_matched = df_skillcorner.copy()  
-        df_skillcorner_matched["Player"] = df_skillcorner_matched["Player"].map(lambda x: all_matches.get(x, x))  
-          
-        # Mesclar os dataframes com base na coluna "Player"  
-        merged_df = pd.merge(df_wyscout, df_skillcorner_matched, on="Player", how="outer")  
-          
-        # Remover colunas redundantes: nome, minutos, IDs e outras colunas não relativas às métricas  
-        redundant_cols = ['Player', 'player_id', 'ID', 'Name', 'player_name', 'Minutes', 'minutes', 'played_id', 'nome', 'minutos']  
-        final_df = merged_df.drop(columns=[col for col in redundant_cols if col in merged_df.columns])  
-          
-        st.subheader("Tabela Mesclada (Somente Métricas)")  
-        st.dataframe(final_df)  
-          
-        output = BytesIO()  
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:  
-            final_df.to_excel(writer, index=False)  
-          
-        st.download_button(  
-            "📥 Download Excel",  
-            data=output.getvalue(),  
-            file_name="metrics.xlsx",  
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"  
-        )  
+    if all([wyscout_file, physical_file, pressure_file]):  
+        try:  
+            df_wyscout = pd.read_excel(wyscout_file)  
+            df_physical = pd.read_excel(physical_file)  
+            df_pressure = pd.read_excel(pressure_file)  
+  
+            st.write("### Preview dos dados:")  
+            col1, col2, col3 = st.columns(3)  
+            with col1:  
+                st.write("WyScout Data:")  
+                st.write(df_wyscout.head())  
+            with col2:  
+                st.write("Physical Output Data:")  
+                st.write(df_physical.head())  
+            with col3:  
+                st.write("Pressure Data:")  
+                st.write(df_pressure.head())  
+  
+            df_skillcorner = pd.merge(df_physical, df_pressure, on="Player", how="outer")  
+            wyscout_only, skill_only = process_mismatches(df_wyscout, df_skillcorner)  
+              
+            if wyscout_only or skill_only:  
+                st.warning(f"Encontrados {len(wyscout_only)} jogadores apenas no WyScout e {len(skill_only)} apenas no SkillCorner")  
+                  
+                links, exclusions = manual_link_interface(wyscout_only, skill_only)  
+                  
+                if st.button("Aplicar Links e Gerar Excel"):  
+                    df_skillcorner_copy = df_skillcorner.copy()  
+                    for wyscout_name, skill_name in links.items():  
+                        df_skillcorner_copy.loc[df_skillcorner_copy["Player"] == skill_name, "Player"] = wyscout_name  
+                      
+                    df_wyscout = df_wyscout[~df_wyscout["Player"].isin(exclusions)]  
+                    final_df = pd.merge(df_wyscout, df_skillcorner_copy, on="Player", how="inner")  
+                      
+                    output = BytesIO()  
+                    with pd.ExcelWriter(output, engine="openpyxl") as writer:  
+                        final_df.to_excel(writer, index=False)  
+                      
+                    st.download_button(  
+                        "📥 Download Excel Mesclado",  
+                        data=output.getvalue(),  
+                        file_name="wyScout_skillcorner_merged.xlsx",  
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"  
+                    )  
+                    st.success(f"Arquivo gerado com {len(final_df)} jogadores após resolução de mismatches")  
+            else:  
+                st.success("Nenhum mismatch encontrado!")  
+                final_df = pd.merge(df_wyscout, df_skillcorner, on="Player", how="inner")  
+                  
+                output = BytesIO()  
+                with pd.ExcelWriter(output, engine="openpyxl") as writer:  
+                    final_df.to_excel(writer, index=False)  
+                  
+                st.download_button(  
+                    "📥 Download Excel Mesclado",  
+                    data=output.getvalue(),  
+                    file_name="wyScout_skillcorner_merged.xlsx",  
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"  
+                )  
+        except Exception as e:  
+            st.error(f"Erro ao processar os arquivos: {str(e)}")  
+            st.write("Por favor, verifique se os arquivos estão no formato correto e tente novamente.")  
   
 if __name__ == "__main__":  
     main()  
