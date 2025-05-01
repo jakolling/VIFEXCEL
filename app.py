@@ -1,9 +1,9 @@
-import streamlit as st
+with open('app.py', 'w') as f:
+    f.write('''import streamlit as st
 import pandas as pd
 import base64
 from io import BytesIO
-from thefuzz import fuzz
-from thefuzz import process
+from thefuzz import fuzz, process
 
 def to_excel(df):
     output = BytesIO()
@@ -15,13 +15,27 @@ def download_link(object_to_download, download_filename, download_link_text):
     if isinstance(object_to_download, pd.DataFrame):
         object_to_download = to_excel(object_to_download)
     b64 = base64.b64encode(object_to_download).decode()
-    return '<a href="data:application/octet-stream;base64,' + b64 + '" download="' + download_filename + '">' + download_link_text + '</a>'
+    return f'<a href="data:application/octet-stream;base64,{b64}" download="{download_filename}">{download_link_text}</a>'
 
 def find_best_match(name, choices, min_score=65):
     best_match = process.extractOne(name, choices, scorer=fuzz.token_sort_ratio)
     if best_match and best_match[1] >= min_score:
         return best_match[0]
-    return "-- None --"
+    return None
+
+def handle_selection(player, selection):
+    st.session_state.temp_selections[player] = selection
+
+def handle_confirmation(player, selection):
+    if selection and selection != "-- None --":
+        st.session_state.confirmed_matches[player] = selection
+        st.session_state.matched_players.add(player)
+
+def handle_rejection(player):
+    if player in st.session_state.confirmed_matches:
+        del st.session_state.confirmed_matches[player]
+    st.session_state.temp_selections[player] = None
+    st.session_state.matched_players.discard(player)
 
 st.title('Player Matching Tool')
 
@@ -92,12 +106,12 @@ if all([wyscout_file, physical_file, overcome_file]):
     
     col1, col2, col3 = st.columns([1,3,1])
     with col1:
-        if st.button('Previous') and st.session_state.page_number > 0:
+        if st.button('Previous', key='prev_page') and st.session_state.page_number > 0:
             st.session_state.page_number -= 1
     with col2:
         st.write(f"Page {st.session_state.page_number + 1} of {max(1, total_pages)}")
     with col3:
-        if st.button('Next') and st.session_state.page_number < total_pages - 1:
+        if st.button('Next', key='next_page') and st.session_state.page_number < total_pages - 1:
             st.session_state.page_number += 1
 
     start_idx = st.session_state.page_number * players_per_page
@@ -105,36 +119,31 @@ if all([wyscout_file, physical_file, overcome_file]):
     
     st.write("### Match Players")
     for idx in range(start_idx, end_idx):
-        player = wyscout_players[idx]
-        cols = st.columns([3,4,1,1])
-        
-        with cols[0]:
-            st.write(f"**{player}**")
-        
-        with cols[1]:
-            current_selection = st.session_state.temp_selections.get(player, "-- None --")
-            selection = st.selectbox(
-                "Match with:",
-                ["-- None --"] + skillcorner_players,
-                index=0 if current_selection == "-- None --" else skillcorner_players.index(current_selection) + 1,
-                key=f"select_{player}"
-            )
-            st.session_state.temp_selections[player] = selection
-        
-        with cols[2]:
-            if st.button("✓", key=f"confirm_{player}"):
-                if selection != "-- None --":
-                    st.session_state.confirmed_matches[player] = selection
-                    st.session_state.matched_players.add(player)
-                    st.experimental_rerun()
-        
-        with cols[3]:
-            if st.button("✗", key=f"reject_{player}"):
-                if player in st.session_state.confirmed_matches:
-                    del st.session_state.confirmed_matches[player]
-                st.session_state.temp_selections[player] = "-- None --"
-                st.session_state.matched_players.discard(player)
-                st.experimental_rerun()
+        if idx < len(wyscout_players):
+            player = wyscout_players[idx]
+            cols = st.columns([3,4,1,1])
+            
+            with cols[0]:
+                st.write(f"**{player}**")
+            
+            with cols[1]:
+                current_selection = st.session_state.temp_selections.get(player)
+                selection = st.selectbox(
+                    "Match with:",
+                    ["-- None --"] + skillcorner_players,
+                    index=0 if not current_selection else skillcorner_players.index(current_selection) + 1,
+                    key=f"select_{player}",
+                    on_change=handle_selection,
+                    args=(player, current_selection)
+                )
+            
+            with cols[2]:
+                if st.button("✓", key=f"confirm_{player}"):
+                    handle_confirmation(player, selection)
+            
+            with cols[3]:
+                if st.button("✗", key=f"reject_{player}"):
+                    handle_rejection(player)
 
     st.write("### Confirmed Matches")
     if st.session_state.confirmed_matches:
@@ -148,15 +157,14 @@ if all([wyscout_file, physical_file, overcome_file]):
 
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("Clear All"):
+        if st.button("Clear All", key='clear_all'):
             st.session_state.temp_selections = {}
             st.session_state.confirmed_matches = {}
             st.session_state.auto_matched = False
             st.session_state.matched_players = set()
-            st.experimental_rerun()
     
     with col2:
-        if st.button("Export Data"):
+        if st.button("Export Data", key='export'):
             wyscout_df['Matched_Player'] = wyscout_df['Player'].map(st.session_state.confirmed_matches)
             wyscout_matched = wyscout_df.dropna(subset=['Matched_Player'])
             
@@ -189,3 +197,4 @@ if all([wyscout_file, physical_file, overcome_file]):
     st.write(f"Matched: {len(st.session_state.confirmed_matches)} of {len(wyscout_df['Player'].dropna().unique())} players")
 else:
     st.info("Please upload all required files to begin matching")
+''')
