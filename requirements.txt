@@ -4,3 +4,4 @@ openpyxl
 xlrd
 fuzzywuzzy
 unidecode
+thefuzz
