@@ -1,4 +1,4 @@
-# Update app.py with all features and fix any syntax errors
+# Update app.py with Skillcorner metrics selector and merging functionality
 with open('app.py', 'w') as f:
     f.write("""import streamlit as st
 import pandas as pd
@@ -7,18 +7,26 @@ import base64
 from io import BytesIO
 
 def init_session_state():
-    defaults = {
-        'confirmed_matches': {},
-        'auto_matched': False,
-        'rejected_players': set(),
-        'match_history': [],
-        'matched_skillcorner_players': set(),
-        'suggested_match': None,
-        'selected_metrics': []
-    }
-    for key, value in defaults.items():
-        if key not in st.session_state:
-            st.session_state[key] = value
+    if 'df' not in st.session_state:
+        st.session_state.df = None
+    if 'confirmed_matches' not in st.session_state:
+        st.session_state.confirmed_matches = {}
+    if 'auto_matched' not in st.session_state:
+        st.session_state.auto_matched = False
+    if 'rejected_players' not in st.session_state:
+        st.session_state.rejected_players = set()
+    if 'match_history' not in st.session_state:
+        st.session_state.match_history = []
+    if 'matched_skillcorner_players' not in st.session_state:
+        st.session_state.matched_skillcorner_players = set()
+    if 'suggested_match' not in st.session_state:
+        st.session_state.suggested_match = None
+    if 'selected_skillcorner_metrics' not in st.session_state:
+        st.session_state.selected_skillcorner_metrics = []
+    if 'skillcorner_metrics' not in st.session_state:
+        st.session_state.skillcorner_metrics = []
+    if 'merged_df' not in st.session_state:
+        st.session_state.merged_df = None
 
 def find_best_match(name, choices, min_score=65):
     if not isinstance(name, str) or not choices:
@@ -41,46 +49,27 @@ def find_best_match(name, choices, min_score=65):
         return best_match[0] if best_match and best_match[1] >= min_score else None
     return None
 
-def export_to_excel(wyscout_df, physical_df, overcome_df):
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        # Create merged dataframe
-        merged_df = pd.DataFrame(list(st.session_state.confirmed_matches.items()), 
-                               columns=['WyScout_Player', 'Physical_Player'])
-        
-        # Add selected metrics
-        if st.session_state.selected_metrics:
-            for metric in st.session_state.selected_metrics:
-                if metric in wyscout_df.columns:
-                    merged_df = merged_df.merge(
-                        wyscout_df[['Player', metric]], 
-                        left_on='WyScout_Player', 
-                        right_on='Player', 
-                        how='left'
-                    ).drop('Player', axis=1)
-                if metric in physical_df.columns:
-                    merged_df = merged_df.merge(
-                        physical_df[['Player', metric]], 
-                        left_on='Physical_Player', 
-                        right_on='Player', 
-                        how='left'
-                    ).drop('Player', axis=1)
-                if metric in overcome_df.columns:
-                    merged_df = merged_df.merge(
-                        overcome_df[['Player', metric]], 
-                        left_on='Physical_Player', 
-                        right_on='Player', 
-                        how='left'
-                    ).drop('Player', axis=1)
-        
-        merged_df.to_excel(writer, sheet_name='Matched_Players', index=False)
-        
-        # Add rejected players
-        pd.DataFrame(list(st.session_state.rejected_players), 
-                    columns=['Rejected_Players']).to_excel(writer, 
-                    sheet_name='Rejected_Players', index=False)
-    
-    return output.getvalue()
+def merge_skillcorner_metrics(wyscout_df, physical_df):
+    merged_df = wyscout_df.copy()
+    if st.session_state.selected_skillcorner_metrics and st.session_state.confirmed_matches:
+        for wyscout_player, skillcorner_player in st.session_state.confirmed_matches.items():
+            player_metrics = physical_df[physical_df['Player'] == skillcorner_player]
+            if not player_metrics.empty:
+                for metric in st.session_state.selected_skillcorner_metrics:
+                    if metric in player_metrics.columns:
+                        merged_df.loc[merged_df['Player'] == wyscout_player, metric] = player_metrics[metric].iloc[0]
+    return merged_df
+
+def export_to_excel():
+    if st.session_state.merged_df is not None:
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            st.session_state.merged_df.to_excel(writer, sheet_name='Matched_Players', index=False)
+            pd.DataFrame(list(st.session_state.rejected_players),
+                        columns=['Rejected_Players']).to_excel(writer,
+                        sheet_name='Rejected_Players', index=False)
+        return output.getvalue()
+    return None
 
 def main():
     st.set_page_config(page_title="Player Matcher", layout="wide")
@@ -108,16 +97,26 @@ def main():
             physical_df = pd.read_csv(physical_file) if physical_file.name.endswith('.csv') else pd.read_excel(physical_file)
             overcome_df = pd.read_csv(overcome_file) if overcome_file.name.endswith('.csv') else pd.read_excel(overcome_file)
             
-            # Metrics selector
-            st.sidebar.write('### Select Metrics')
-            all_metrics = (set(wyscout_df.columns) | 
-                         set(physical_df.columns) | 
-                         set(overcome_df.columns)) - {'Player'}
-            st.session_state.selected_metrics = st.sidebar.multiselect(
-                'Choose metrics to include in export',
-                options=sorted(list(all_metrics)),
-                default=st.session_state.selected_metrics
+            st.session_state.df = wyscout_df
+            
+            # Update available Skillcorner metrics
+            st.session_state.skillcorner_metrics = [col for col in physical_df.columns if col != 'Player']
+            
+            # Skillcorner metrics selector in sidebar
+            st.sidebar.write('### Skillcorner Metrics')
+            st.session_state.selected_skillcorner_metrics = st.sidebar.multiselect(
+                'Select metrics to merge from Skillcorner data',
+                options=st.session_state.skillcorner_metrics,
+                default=st.session_state.selected_skillcorner_metrics
             )
+            
+            # Update merged dataframe when metrics are selected
+            st.session_state.merged_df = merge_skillcorner_metrics(wyscout_df, physical_df)
+            
+            # Display current merged dataframe
+            if st.session_state.merged_df is not None and st.session_state.selected_skillcorner_metrics:
+                st.write('### Current Merged Data')
+                st.write(st.session_state.merged_df[['Player'] + st.session_state.selected_skillcorner_metrics].head())
             
             # Match list display
             st.sidebar.write('### Matched Players')
@@ -129,10 +128,11 @@ def main():
             
             # Export button
             if st.sidebar.button('Export to Excel'):
-                excel_data = export_to_excel(wyscout_df, physical_df, overcome_df)
-                b64 = base64.b64encode(excel_data).decode()
-                href = f'data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}'
-                st.sidebar.markdown(f'<a href="{href}" download="matched_players.xlsx">Download Excel File</a>', unsafe_allow_html=True)
+                excel_data = export_to_excel()
+                if excel_data:
+                    b64 = base64.b64encode(excel_data).decode()
+                    href = f'data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}'
+                    st.sidebar.markdown(f'<a href="{href}" download="matched_players.xlsx">Download Excel File</a>', unsafe_allow_html=True)
             
             unmatched_players = [p for p in wyscout_df['Player'].dropna().unique() 
                                if p not in st.session_state.confirmed_matches 
@@ -141,16 +141,6 @@ def main():
             if unmatched_players:
                 current_player = unmatched_players[0]
                 st.write(f'Current player: **{current_player}**')
-                
-                # Display current player metrics if selected
-                if st.session_state.selected_metrics:
-                    metrics_col1, metrics_col2 = st.columns(2)
-                    with metrics_col1:
-                        st.write("### WyScout Metrics")
-                        player_metrics = wyscout_df[wyscout_df['Player'] == current_player]
-                        for metric in st.session_state.selected_metrics:
-                            if metric in player_metrics.columns:
-                                st.write(f"{metric}: {player_metrics[metric].iloc[0]}")
                 
                 available_skillcorner = [p for p in physical_df['Player'].dropna().unique() 
                                        if p not in st.session_state.matched_skillcorner_players]
@@ -171,11 +161,11 @@ def main():
                                                 options=[''] + available_skillcorner,
                                                 index=select_index)
                     
-                    # Display selected player metrics if selected
-                    if selected_match and st.session_state.selected_metrics:
-                        st.write("### Physical Metrics")
+                    # Display selected player metrics
+                    if selected_match and st.session_state.selected_skillcorner_metrics:
+                        st.write("### Selected Skillcorner Metrics")
                         player_metrics = physical_df[physical_df['Player'] == selected_match]
-                        for metric in st.session_state.selected_metrics:
+                        for metric in st.session_state.selected_skillcorner_metrics:
                             if metric in player_metrics.columns:
                                 st.write(f"{metric}: {player_metrics[metric].iloc[0]}")
                 
@@ -223,4 +213,4 @@ def main():
 if __name__ == '__main__':
     main()""")
 
-print("Updated app.py saved with all features including metrics selector, match list, and Excel export. Run with: streamlit run app.py")
+print("Updated app.py with Skillcorner metrics selector and merging functionality. Run with: streamlit run app.py")
