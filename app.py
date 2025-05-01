@@ -1,231 +1,152 @@
-import streamlit as st  
 import pandas as pd  
-import numpy as np  
-from io import BytesIO  
 import re  
 from unidecode import unidecode  
+from rapidfuzz import fuzz, process  
+import logging  
+from datetime import datetime  
   
-st.set_page_config(page_title='Data Merger', layout='wide')  
+logging.basicConfig(  
+    filename=f'matching_analysis_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log',  
+    level=logging.INFO,  
+    format='%(asctime)s:%(levelname)s:%(message)s'  
+)  
   
 def normalize_name(name):  
     if not isinstance(name, str):  
         return ''  
     name = unidecode(str(name)).lower()  
-    name = re.sub(r'[^a-z0-9\s]', '', name)  
+    name = re.sub(r'[^a-z0-9\s\-]', '', name)  
     name = re.sub(r'\s+', ' ', name)  
+    name = name.replace('-', ' ')  
     return name.strip()  
   
-def get_key_name(name):  
+def get_name_variations(name):  
     normalized = normalize_name(name)  
     parts = normalized.split()  
-    if len(parts) == 0:  
-        return ''  
-    if len(parts) == 1:  
-        return parts[0]  
-    return parts[-1]  
+    variations = set()  
+    if not parts:  
+        return []  
+    variations.add(normalized)  
+    for i in range(len(parts)):  
+        variations.add(parts[i])  
+    if len(parts) >= 2:  
+        variations.add(f"{parts[0]} {parts[-1]}")  
+        variations.add(f"{parts[-1]} {parts[0]}")  
+        variations.add(' '.join(parts[:2]))  
+        variations.add(' '.join(parts[-2:]))  
+    if len(parts) >= 3:  
+        variations.add(' '.join(parts[:3]))  
+        variations.add(' '.join(parts[-3:]))  
+        variations.add(f"{parts[0]} {parts[1]} {parts[-1]}")  
+    return list(variations)  
   
-def find_matches(source_df, target_df):  
+def find_matches_v2(source_df, target_df):  
     matches = {}  
     unmatched = []  
-    source_dict = {get_key_name(name): name for name in source_df['Player'].dropna()}  
-    target_dict = {get_key_name(name): name for name in target_df['Player'].dropna()}  
-    for source_name, original_source in source_dict.items():  
-        if source_name in target_dict:  
-            matches[original_source] = target_dict[source_name]  
-        else:  
-            unmatched.append(original_source)  
-    return matches, unmatched  
-  
-def merge_dataframes(df1, df2, df3, matches1, matches2, selected_physical_cols, selected_pressure_cols):  
-    df2_matched = df2.copy()  
-    df3_matched = df3.copy()  
+    match_scores = {}  
       
-    df2_matched['Player'] = df2_matched['Player'].map(matches1)  
-    df3_matched['Player'] = df3_matched['Player'].map(matches2)  
+    source_players = source_df['Player'].dropna().unique()  
+    target_players = target_df['Player'].dropna().unique()  
       
-    if selected_physical_cols:  
-        physical_cols = ['Player'] + selected_physical_cols  
-        df2_matched = df2_matched[physical_cols]  
-      
-    if selected_pressure_cols:  
-        pressure_cols = ['Player'] + selected_pressure_cols  
-        df3_matched = df3_matched[pressure_cols]  
-      
-    merged = pd.merge(df1, df2_matched, on='Player', how='inner')  
-    final = pd.merge(merged, df3_matched, on='Player', how='inner')  
-      
-    columns_to_drop = [  
-        'Short Name',  
-        'Player ID',  
-        'Birthdate',  
-        'Minutes',  
-        'Count Performances (Physical Check passed)',  
-        'Count Performances (Physical Check failed)',  
-        'third',  
-        'channel',  
-        'Minutes played per match'  
-    ]  
-    final = final.drop(columns=[col for col in columns_to_drop if col in final.columns])  
-      
-    return final  
-  
-st.title('Data Merger')  
-  
-if 'selected_physical_cols' not in st.session_state:  
-    st.session_state.selected_physical_cols = []  
-if 'selected_pressure_cols' not in st.session_state:  
-    st.session_state.selected_pressure_cols = []  
-if 'physical_popup' not in st.session_state:  
-    st.session_state.physical_popup = False  
-if 'pressure_popup' not in st.session_state:  
-    st.session_state.pressure_popup = False  
-  
-def toggle_physical_popup():  
-    st.session_state.physical_popup = not st.session_state.physical_popup  
-  
-def toggle_pressure_popup():  
-    st.session_state.pressure_popup = not st.session_state.pressure_popup  
-  
-col1, col2, col3 = st.columns(3)  
-  
-with col1:  
-    uploaded_wyscout = st.file_uploader('Upload WyScout Excel', type=['xlsx'])  
-with col2:  
-    uploaded_physical = st.file_uploader('Upload SkillCorner Physical Output Excel', type=['xlsx'])  
-with col3:  
-    uploaded_pressure = st.file_uploader('Upload SkillCorner Overcome Pressure Excel', type=['xlsx'])  
-  
-if all([uploaded_wyscout, uploaded_physical, uploaded_pressure]):  
-    df_wyscout = pd.read_excel(uploaded_wyscout)  
-    df_physical = pd.read_excel(uploaded_physical)  
-    df_pressure = pd.read_excel(uploaded_pressure)  
-  
-    col1, col2 = st.columns(2)  
-      
-    with col1:  
-        if st.button('Select Physical Columns', on_click=toggle_physical_popup):  
-            pass  
-    with col2:  
-        if st.button('Select Pressure Columns', on_click=toggle_pressure_popup):  
-            pass  
-  
-    if st.session_state.physical_popup:  
-        with st.container():  
-            st.subheader('Select Physical Data Columns')  
-            physical_columns = [col for col in df_physical.columns if col != 'Player']  
+    target_dict = {}  
+    for player in target_players:  
+        variations = get_name_variations(player)  
+        for var in variations:  
+            target_dict[var] = player  
               
-            if st.checkbox('Select All Physical', value=len(st.session_state.selected_physical_cols) == len(physical_columns)):  
-                st.session_state.selected_physical_cols = physical_columns.copy()  
-            else:  
-                cols = st.columns(3)  
-                columns_per_col = len(physical_columns) // 3 + 1  
-                  
-                for i, col in enumerate(physical_columns):  
-                    col_idx = i // columns_per_col  
-                    with cols[col_idx]:  
-                        if st.checkbox(col, value=col in st.session_state.selected_physical_cols, key='phys_' + col):  
-                            if col not in st.session_state.selected_physical_cols:  
-                                st.session_state.selected_physical_cols.append(col)  
-                        elif col in st.session_state.selected_physical_cols:  
-                            st.session_state.selected_physical_cols.remove(col)  
-              
-            if st.button('Close Physical Selection'):  
-                st.session_state.physical_popup = False  
-  
-    if st.session_state.pressure_popup:  
-        with st.container():  
-            st.subheader('Select Pressure Data Columns')  
-            pressure_columns = [col for col in df_pressure.columns if col != 'Player']  
-              
-            if st.checkbox('Select All Pressure', value=len(st.session_state.selected_pressure_cols) == len(pressure_columns)):  
-                st.session_state.selected_pressure_cols = pressure_columns.copy()  
-            else:  
-                cols = st.columns(3)  
-                columns_per_col = len(pressure_columns) // 3 + 1  
-                  
-                for i, col in enumerate(pressure_columns):  
-                    col_idx = i // columns_per_col  
-                    with cols[col_idx]:  
-                        if st.checkbox(col, value=col in st.session_state.selected_pressure_cols, key='pres_' + col):  
-                            if col not in st.session_state.selected_pressure_cols:  
-                                st.session_state.selected_pressure_cols.append(col)  
-                        elif col in st.session_state.selected_pressure_cols:  
-                            st.session_state.selected_pressure_cols.remove(col)  
-              
-            if st.button('Close Pressure Selection'):  
-                st.session_state.pressure_popup = False  
-  
-    st.write('Selected Physical Columns:', st.session_state.selected_physical_cols)  
-    st.write('Selected Pressure Columns:', st.session_state.selected_pressure_cols)  
-  
-    st.sidebar.write('WyScout Preview')  
-    st.sidebar.dataframe(df_wyscout.head())  
-    st.sidebar.write('Physical Preview')  
-    st.sidebar.dataframe(df_physical.head())  
-    st.sidebar.write('Pressure Preview')  
-    st.sidebar.dataframe(df_pressure.head())  
-  
-    tab1, tab2 = st.tabs(['Physical vs WyScout', 'Pressure vs WyScout'])  
+    target_variations = list(target_dict.keys())  
       
-    with tab1:  
-        physical_matches, physical_unmatched = find_matches(df_physical, df_wyscout)  
-        st.write('Matches Found:')  
-        st.write(physical_matches)  
+    for source_player in source_players:  
+        source_variations = get_name_variations(source_player)  
+        best_match = None  
+        best_score = 0  
+        match_found = False  
           
-        if physical_unmatched:  
-            st.write('Unmatched Players:')  
-            physical_manual = {}  
-            for player in physical_unmatched:  
-                st.write('Player: ' + player)  
-                choose = st.selectbox(  
-                    'Select correct match',  
-                    ['Select...'] + sorted(df_wyscout['Player'].unique().tolist()),  
-                    key='physical_' + player  
-                )  
-                if choose != 'Select...':  
-                    physical_manual[player] = choose  
-            physical_matches.update(physical_manual)  
-      
-    with tab2:  
-        pressure_matches, pressure_unmatched = find_matches(df_pressure, df_wyscout)  
-        st.write('Matches Found:')  
-        st.write(pressure_matches)  
+        for var in source_variations:  
+            if var in target_dict:  
+                matches[source_player] = target_dict[var]  
+                match_scores[source_player] = 100  
+                match_found = True  
+                logging.info(f"Direct match: {source_player} -> {target_dict[var]}")  
+                break  
           
-        if pressure_unmatched:  
-            st.write('Unmatched Players:')  
-            pressure_manual = {}  
-            for player in pressure_unmatched:  
-                st.write('Player: ' + player)  
-                choose = st.selectbox(  
-                    'Select correct match',  
-                    ['Select...'] + sorted(df_wyscout['Player'].unique().tolist()),  
-                    key='pressure_' + player  
+        if not match_found:  
+            for var in source_variations:  
+                result = process.extractOne(  
+                    var,  
+                    target_variations,  
+                    scorer=fuzz.token_sort_ratio,  
+                    score_cutoff=70  
                 )  
-                if choose != 'Select...':  
-                    pressure_manual[player] = choose  
-            pressure_matches.update(pressure_manual)  
+                if result is None:  
+                    continue  
+                match, score, _ = result  
+                if score > best_score:  
+                    best_score = score  
+                    best_match = target_dict.get(match)  
+            if best_match and best_score >= 85:  
+                matches[source_player] = best_match  
+                match_scores[source_player] = best_score  
+                logging.info(f"Fuzzy match ({best_score}%): {source_player} -> {best_match}")  
+            else:  
+                unmatched.append(source_player)  
+                logging.warning(f"No match found for: {source_player}")  
+                if best_match:  
+                    logging.warning(f"Best potential match ({best_score}%): {best_match}")  
+      
+    with open('matching_report.txt', 'w', encoding='utf-8') as f:  
+        f.write("=== MATCHING REPORT ===\n\n")  
+        f.write("MATCHED PLAYERS:\n")  
+        for source, target in matches.items():  
+            score = match_scores.get(source, 'N/A')  
+            f.write(f"{source} -> {target} (Score: {score})\n")  
+        f.write("\nUNMATCHED PLAYERS:\n")  
+        for player in unmatched:  
+            f.write(f"{player}\n")  
+        f.write(f"\nTotal matched: {len(matches)}")  
+        f.write(f"\nTotal unmatched: {len(unmatched)}")  
+          
+    return matches, unmatched, match_scores  
   
-    if st.button('Merge Data'):  
-        if not st.session_state.selected_physical_cols or not st.session_state.selected_pressure_cols:  
-            st.warning('Please select columns from both Physical and Pressure data')  
-        else:  
-            final_df = merge_dataframes(df_wyscout, df_physical, df_pressure,  
-                                      physical_matches, pressure_matches,  
-                                      st.session_state.selected_physical_cols,  
-                                      st.session_state.selected_pressure_cols)  
-              
-            output = BytesIO()  
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:  
-                final_df.to_excel(writer, index=False)  
-              
-            st.download_button(  
-                '📥 Download Merged Data',  
-                data=output.getvalue(),  
-                file_name='merged_data.xlsx',  
-                mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'  
-            )  
-              
-            st.success('✅ Merged ' + str(len(final_df)) + ' players')  
-            st.dataframe(final_df.head())  
-else:  
-    st.info('👆 Please upload all three Excel files')  
+# Test com dados de exemplo  
+if __name__ == '__main__':  
+    test_source = pd.DataFrame({  
+        'Player': [  
+            'João Pedro Santos Silva',  
+            'Roberto Carlos da Silva',  
+            'Ronaldo Nazário de Lima',  
+            'Neymar Jr',  
+            'Gabriel Jesus',  
+            'Vinicius Junior',  
+            'Casemiro',  
+            'Richarlison de Andrade',  
+            'Raphinha',  
+            'Lucas Paquetá'  
+        ]  
+    })  
+      
+    test_target = pd.DataFrame({  
+        'Player': [  
+            'Joao Pedro',  
+            'Roberto Carlos',  
+            'Ronaldo',  
+            'Neymar',  
+            'Gabriel Jesus Silva',  
+            'Vini Jr',  
+            'Carlos Casemiro',  
+            'Richarlison',  
+            'Raphinha Dias',  
+            'Lucas Paqueta'  
+        ]  
+    })  
+      
+    matches, unmatched, scores = find_matches_v2(test_source, test_target)  
+      
+    print("\nMatches encontrados:")  
+    for source, target in matches.items():  
+        score = scores.get(source, 'N/A')  
+        print(f"{source} -> {target} (Score: {score})")  
+      
+    print("\nJogadores não correspondidos:")  
+    for player in unmatched:  
+        print(player)  
