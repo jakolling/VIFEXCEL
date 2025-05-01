@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 import base64
@@ -98,7 +99,25 @@ if all([wyscout_file, physical_file, overcome_file]):
                        if p not in st.session_state.rejected_players and
                        p not in st.session_state.confirmed_matches]
 
-    # === NOVA UI DE MATCHING (um jogador por vez)
+    st.write("### Select Metrics")
+    col_metrics1, col_metrics2 = st.columns(2)
+
+    with col_metrics1:
+        physical_cols = [col for col in physical_df.columns if col != 'Player']
+        selected_physical = st.multiselect(
+            "Physical Output metrics:",
+            physical_cols,
+            default=physical_cols
+        )
+
+    with col_metrics2:
+        overcome_cols = [col for col in overcome_df.columns if col != 'Player']
+        selected_overcome = st.multiselect(
+            "Overcome Pressure metrics:",
+            overcome_cols,
+            default=overcome_cols
+        )
+
     if wyscout_players:
         current_player = wyscout_players[0]
         st.subheader(f"🎯 Match Player: {current_player}")
@@ -152,7 +171,6 @@ if all([wyscout_file, physical_file, overcome_file]):
     else:
         st.success("✅ All players have been matched or rejected!")
 
-    # === RESTANTE DO APP (inalterado)
     st.markdown("---")
     col1, col2 = st.columns([2,1])
 
@@ -186,8 +204,8 @@ if all([wyscout_file, physical_file, overcome_file]):
             wyscout_df['Matched_Player'] = wyscout_df['Player'].map(st.session_state.confirmed_matches)
             wyscout_matched = wyscout_df.dropna(subset=['Matched_Player'])
 
-            physical_subset = physical_df[['Player'] + [col for col in physical_df.columns if col != 'Player']]
-            overcome_subset = overcome_df[['Player'] + [col for col in overcome_df.columns if col != 'Player']]
+            physical_subset = physical_df[['Player'] + selected_physical]
+            overcome_subset = overcome_df[['Player'] + selected_overcome]
 
             merged_df = pd.merge(
                 wyscout_matched,
