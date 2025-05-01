@@ -113,10 +113,11 @@ def main():
             # Update merged dataframe when metrics are selected
             st.session_state.merged_df = merge_skillcorner_metrics(wyscout_df, physical_df)
             
-            # Display current merged dataframe
+            # Display current merged dataframe preview
             if st.session_state.merged_df is not None and st.session_state.selected_skillcorner_metrics:
-                st.write('### Current Merged Data')
-                st.write(st.session_state.merged_df[['Player'] + st.session_state.selected_skillcorner_metrics].head())
+                st.write('### Current Merged Data Preview')
+                preview_cols = ['Player'] + st.session_state.selected_skillcorner_metrics
+                st.write(st.session_state.merged_df[preview_cols].head())
             
             # Match list display
             st.sidebar.write('### Matched Players')
@@ -140,7 +141,7 @@ def main():
             
             if unmatched_players:
                 current_player = unmatched_players[0]
-                st.write(f'Current player: **{current_player}**')
+                st.write(f'### Current Player: {current_player}')
                 
                 available_skillcorner = [p for p in physical_df['Player'].dropna().unique() 
                                        if p not in st.session_state.matched_skillcorner_players]
@@ -163,7 +164,7 @@ def main():
                     
                     # Display selected player metrics
                     if selected_match and st.session_state.selected_skillcorner_metrics:
-                        st.write("### Selected Skillcorner Metrics")
+                        st.write("### Selected Player Metrics")
                         player_metrics = physical_df[physical_df['Player'] == selected_match]
                         for metric in st.session_state.selected_skillcorner_metrics:
                             if metric in player_metrics.columns:
@@ -213,4 +214,4 @@ def main():
 if __name__ == '__main__':
     main()""")
 
-print("Updated app.py with Skillcorner metrics selector and merging functionality. Run with: streamlit run app.py")
+print("Updated app.py with enhanced Skillcorner metrics selector and merging functionality. Run with: streamlit run app.py")
