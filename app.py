@@ -23,19 +23,13 @@ def find_best_match(name, choices, min_score=65):
         return best_match[0]
     return None
 
-def handle_selection(player, selection):
-    st.session_state.temp_selections[player] = selection
-
-def handle_confirmation(player, selection):
-    if selection and selection != "-- None --":
-        st.session_state.confirmed_matches[player] = selection
-        st.session_state.matched_players.add(player)
-
-def handle_rejection(player):
-    if player in st.session_state.confirmed_matches:
-        del st.session_state.confirmed_matches[player]
-    st.session_state.temp_selections[player] = None
-    st.session_state.matched_players.discard(player)
+def get_selection_index(current_selection, choices):
+    try:
+        if current_selection and current_selection != "-- None --" and current_selection in choices:
+            return choices.index(current_selection) + 1
+    except (ValueError, TypeError):
+        pass
+    return 0
 
 st.title('Player Matching Tool')
 
@@ -106,12 +100,12 @@ if all([wyscout_file, physical_file, overcome_file]):
     
     col1, col2, col3 = st.columns([1,3,1])
     with col1:
-        if st.button('Previous', key='prev_page') and st.session_state.page_number > 0:
+        if st.button('Previous') and st.session_state.page_number > 0:
             st.session_state.page_number -= 1
     with col2:
         st.write(f"Page {st.session_state.page_number + 1} of {max(1, total_pages)}")
     with col3:
-        if st.button('Next', key='next_page') and st.session_state.page_number < total_pages - 1:
+        if st.button('Next') and st.session_state.page_number < total_pages - 1:
             st.session_state.page_number += 1
 
     start_idx = st.session_state.page_number * players_per_page
@@ -128,22 +122,28 @@ if all([wyscout_file, physical_file, overcome_file]):
             
             with cols[1]:
                 current_selection = st.session_state.temp_selections.get(player)
+                selection_index = get_selection_index(current_selection, skillcorner_players)
+                
                 selection = st.selectbox(
                     "Match with:",
                     ["-- None --"] + skillcorner_players,
-                    index=0 if not current_selection else skillcorner_players.index(current_selection) + 1,
-                    key=f"select_{player}",
-                    on_change=handle_selection,
-                    args=(player, current_selection)
+                    index=selection_index,
+                    key=f"select_{player}"
                 )
+                st.session_state.temp_selections[player] = selection if selection != "-- None --" else None
             
             with cols[2]:
                 if st.button("✓", key=f"confirm_{player}"):
-                    handle_confirmation(player, selection)
+                    if selection != "-- None --":
+                        st.session_state.confirmed_matches[player] = selection
+                        st.session_state.matched_players.add(player)
             
             with cols[3]:
                 if st.button("✗", key=f"reject_{player}"):
-                    handle_rejection(player)
+                    if player in st.session_state.confirmed_matches:
+                        del st.session_state.confirmed_matches[player]
+                    st.session_state.temp_selections[player] = None
+                    st.session_state.matched_players.discard(player)
 
     st.write("### Confirmed Matches")
     if st.session_state.confirmed_matches:
@@ -157,14 +157,14 @@ if all([wyscout_file, physical_file, overcome_file]):
 
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("Clear All", key='clear_all'):
+        if st.button("Clear All"):
             st.session_state.temp_selections = {}
             st.session_state.confirmed_matches = {}
             st.session_state.auto_matched = False
             st.session_state.matched_players = set()
     
     with col2:
-        if st.button("Export Data", key='export'):
+        if st.button("Export Data"):
             wyscout_df['Matched_Player'] = wyscout_df['Player'].map(st.session_state.confirmed_matches)
             wyscout_matched = wyscout_df.dropna(subset=['Matched_Player'])
             
