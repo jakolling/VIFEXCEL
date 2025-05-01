@@ -1,152 +1,120 @@
+import streamlit as st  
 import pandas as pd  
-import re  
-from unidecode import unidecode  
-from rapidfuzz import fuzz, process  
-import logging  
-from datetime import datetime  
+import numpy as np  
+import base64  
+from io import BytesIO  
   
-logging.basicConfig(  
-    filename=f'matching_analysis_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log',  
-    level=logging.INFO,  
-    format='%(asctime)s:%(levelname)s:%(message)s'  
-)  
-  
-def normalize_name(name):  
-    if not isinstance(name, str):  
-        return ''  
-    name = unidecode(str(name)).lower()  
-    name = re.sub(r'[^a-z0-9\s\-]', '', name)  
-    name = re.sub(r'\s+', ' ', name)  
-    name = name.replace('-', ' ')  
-    return name.strip()  
-  
-def get_name_variations(name):  
-    normalized = normalize_name(name)  
-    parts = normalized.split()  
-    variations = set()  
-    if not parts:  
-        return []  
-    variations.add(normalized)  
-    for i in range(len(parts)):  
-        variations.add(parts[i])  
-    if len(parts) >= 2:  
-        variations.add(f"{parts[0]} {parts[-1]}")  
-        variations.add(f"{parts[-1]} {parts[0]}")  
-        variations.add(' '.join(parts[:2]))  
-        variations.add(' '.join(parts[-2:]))  
-    if len(parts) >= 3:  
-        variations.add(' '.join(parts[:3]))  
-        variations.add(' '.join(parts[-3:]))  
-        variations.add(f"{parts[0]} {parts[1]} {parts[-1]}")  
-    return list(variations)  
-  
-def find_matches_v2(source_df, target_df):  
+def exact_match_only(source_df, target_df):  
+    """  
+    Realiza a correspondência exata 100% entre jogadores   
+    dos dois dataframes, sem realizar nenhuma normalização adicional.  
+    """  
     matches = {}  
     unmatched = []  
-    match_scores = {}  
       
     source_players = source_df['Player'].dropna().unique()  
-    target_players = target_df['Player'].dropna().unique()  
-      
-    target_dict = {}  
-    for player in target_players:  
-        variations = get_name_variations(player)  
-        for var in variations:  
-            target_dict[var] = player  
-              
-    target_variations = list(target_dict.keys())  
+    target_players = set(target_df['Player'].dropna().unique())  
       
     for source_player in source_players:  
-        source_variations = get_name_variations(source_player)  
-        best_match = None  
-        best_score = 0  
-        match_found = False  
-          
-        for var in source_variations:  
-            if var in target_dict:  
-                matches[source_player] = target_dict[var]  
-                match_scores[source_player] = 100  
-                match_found = True  
-                logging.info(f"Direct match: {source_player} -> {target_dict[var]}")  
-                break  
-          
-        if not match_found:  
-            for var in source_variations:  
-                result = process.extractOne(  
-                    var,  
-                    target_variations,  
-                    scorer=fuzz.token_sort_ratio,  
-                    score_cutoff=70  
-                )  
-                if result is None:  
-                    continue  
-                match, score, _ = result  
-                if score > best_score:  
-                    best_score = score  
-                    best_match = target_dict.get(match)  
-            if best_match and best_score >= 85:  
-                matches[source_player] = best_match  
-                match_scores[source_player] = best_score  
-                logging.info(f"Fuzzy match ({best_score}%): {source_player} -> {best_match}")  
-            else:  
-                unmatched.append(source_player)  
-                logging.warning(f"No match found for: {source_player}")  
-                if best_match:  
-                    logging.warning(f"Best potential match ({best_score}%): {best_match}")  
-      
-    with open('matching_report.txt', 'w', encoding='utf-8') as f:  
-        f.write("=== MATCHING REPORT ===\n\n")  
-        f.write("MATCHED PLAYERS:\n")  
-        for source, target in matches.items():  
-            score = match_scores.get(source, 'N/A')  
-            f.write(f"{source} -> {target} (Score: {score})\n")  
-        f.write("\nUNMATCHED PLAYERS:\n")  
+        if source_player in target_players:  
+            matches[source_player] = source_player  
+        else:  
+            unmatched.append(source_player)  
+              
+    # Grava os resultados em um arquivo CSV para consulta  
+    with open('player_matching_report.csv', 'w', encoding='utf-8') as f:  
+        f.write('Source Player,Status\n')  
+        for player in matches:  
+            f.write(f'{player},Matched\n')  
         for player in unmatched:  
-            f.write(f"{player}\n")  
-        f.write(f"\nTotal matched: {len(matches)}")  
-        f.write(f"\nTotal unmatched: {len(unmatched)}")  
-          
-    return matches, unmatched, match_scores  
+            f.write(f'{player},Unmatched\n')  
+              
+    return matches, unmatched  
   
-# Test com dados de exemplo  
-if __name__ == '__main__':  
-    test_source = pd.DataFrame({  
-        'Player': [  
-            'João Pedro Santos Silva',  
-            'Roberto Carlos da Silva',  
-            'Ronaldo Nazário de Lima',  
-            'Neymar Jr',  
-            'Gabriel Jesus',  
-            'Vinicius Junior',  
-            'Casemiro',  
-            'Richarlison de Andrade',  
-            'Raphinha',  
-            'Lucas Paquetá'  
-        ]  
-    })  
+def apply_matches(df, matches):  
+    """  
+    Aplica as correspondências encontradas ao dataframe original,  
+    adicionando uma nova coluna 'Matched_Player'.  
+    """  
+    df['Matched_Player'] = df['Player'].map(matches)  
+    return df  
+  
+def to_excel(df):  
+    """  
+    Converte o dataframe para um arquivo Excel em memória.  
+    """  
+    output = BytesIO()  
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:  
+        df.to_excel(writer, index=False, sheet_name='Sheet1')  
+    processed_data = output.getvalue()  
+    return processed_data  
+  
+def download_link(object_to_download, download_filename, download_link_text):  
+    """  
+    Gera um link para download do objeto (arquivo Excel ou CSV) convertido para base64.  
+    """  
+    if isinstance(object_to_download, pd.DataFrame):  
+        object_to_download = to_excel(object_to_download)  
       
-    test_target = pd.DataFrame({  
-        'Player': [  
-            'Joao Pedro',  
-            'Roberto Carlos',  
-            'Ronaldo',  
-            'Neymar',  
-            'Gabriel Jesus Silva',  
-            'Vini Jr',  
-            'Carlos Casemiro',  
-            'Richarlison',  
-            'Raphinha Dias',  
-            'Lucas Paqueta'  
-        ]  
-    })  
+    b64 = base64.b64encode(object_to_download).decode()  
+    return f'<a href="data:application/octet-stream;base64,{b64}" download="{download_filename}">{download_link_text}</a>'  
+  
+st.title('Player Matching App')  
+st.write('Faça upload dos arquivos WyScout e SkillCorner para realizar o matching exato dos jogadores')  
+  
+# Upload dos arquivos  
+wyscout_file = st.file_uploader("Carregar arquivo WyScout", type=['xlsx', 'xls', 'csv'])  
+skillcorner_file = st.file_uploader("Carregar arquivo SkillCorner", type=['xlsx', 'xls', 'csv'])  
+  
+if wyscout_file and skillcorner_file:  
+    try:  
+        # Leitura dos arquivos  
+        if wyscout_file.name.endswith('.csv'):  
+            wyscout_df = pd.read_csv(wyscout_file)  
+        else:  
+            wyscout_df = pd.read_excel(wyscout_file)  
+          
+        if skillcorner_file.name.endswith('.csv'):  
+            skillcorner_df = pd.read_csv(skillcorner_file)  
+        else:  
+            skillcorner_df = pd.read_excel(skillcorner_file)  
+          
+        # Seleção de colunas de interesse  
+        st.write("Colunas disponíveis no WyScout:")  
+        wyscout_cols = st.multiselect('Selecione as colunas que deseja manter do WyScout:', wyscout_df.columns.tolist())  
+          
+        st.write("Colunas disponíveis no SkillCorner:")  
+        skillcorner_cols = st.multiselect('Selecione as colunas que deseja manter do SkillCorner:', skillcorner_df.columns.tolist())  
+          
+        if wyscout_cols and skillcorner_cols:  
+            wyscout_subset = wyscout_df[wyscout_cols]  
+            skillcorner_subset = skillcorner_df[skillcorner_cols]  
+              
+            # Realiza o matching exato entre jogadores  
+            matches, unmatched = exact_match_only(wyscout_subset, skillcorner_subset)  
+              
+            matched_df = apply_matches(wyscout_subset.copy(), matches)  
+              
+            if len(matches) > 0:  
+                st.success(f"Foram encontrados {len(matches)} matches exatos!")  
+                st.write("Exemplo dos dados matched:")  
+                st.dataframe(matched_df.head())  
+                  
+                if st.button("Download dos Dados Matched"):  
+                    tmp_download_link = download_link(matched_df, 'matched_players.xlsx', 'Clique aqui para baixar os dados matched!')  
+                    st.markdown(tmp_download_link, unsafe_allow_html=True)  
+              
+            if len(unmatched) > 0:  
+                st.warning(f"Foram encontrados {len(unmatched)} jogadores sem match exato")  
+                unmatched_df = pd.DataFrame({'Unmatched_Players': unmatched})  
+                st.write("Jogadores sem match:")  
+                st.dataframe(unmatched_df)  
+                  
+                if st.button("Download dos Jogadores Não Correspondidos"):  
+                    tmp_download_link = download_link(unmatched_df, 'unmatched_players.xlsx', 'Clique aqui para baixar os jogadores não correspondidos!')  
+                    st.markdown(tmp_download_link, unsafe_allow_html=True)  
       
-    matches, unmatched, scores = find_matches_v2(test_source, test_target)  
-      
-    print("\nMatches encontrados:")  
-    for source, target in matches.items():  
-        score = scores.get(source, 'N/A')  
-        print(f"{source} -> {target} (Score: {score})")  
-      
-    print("\nJogadores não correspondidos:")  
-    for player in unmatched:  
-        print(player)  
+    except Exception as e:  
+        st.error(f"Ocorreu um erro: {str(e)}")  
+else:  
+    st.info("Por favor, carregue ambos os arquivos para iniciar o matching")  
