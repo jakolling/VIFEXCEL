@@ -1,8 +1,9 @@
 import streamlit as st  
 import pandas as pd  
-from difflib import SequenceMatcher  
 from io import BytesIO  
+from difflib import SequenceMatcher  
   
+# Functions for matching players (kept here for backward compatibility in case matching is needed)  
 def name_similarity(a, b):  
     return SequenceMatcher(None, a.lower(), b.lower()).ratio()  
   
@@ -25,57 +26,86 @@ def manual_link_interface(mismatched_players, wyscout_players):
             manual_links[skill_player] = manual_choice  
     return manual_links  
   
+# Main function  
 def main():  
-    st.title("Merge Métricas de Performance")  
+    st.title("Merge de Métricas de Performance")  
       
-    wyscout_file = st.file_uploader("WyScout", type=['csv', 'xlsx'])  
-    skillcorner_file = st.file_uploader("SkillCorner", type=['csv', 'xlsx'])  
-  
-    if wyscout_file and skillcorner_file:  
+    # File upload widgets  
+    wyscout_file = st.file_uploader("Arquivo WyScout", type=['csv', 'xlsx'])  
+    skillcorner_file = st.file_uploader("Arquivo SkillCorner", type=['csv', 'xlsx'])  
+      
+    # Testing mode: if no files are uploaded, use sample data  
+    if not wyscout_file and not skillcorner_file:  
+        st.info("Usando conjuntos de dados exemplo")  
+        data_wyscout = {  
+            "Player": ["João", "Maria", "Carlos"],  
+            "Goals": [2, 1, 0],  
+            "Assists": [0, 1, 0],  
+            "player_id": [101, 102, 103]  
+        }  
+        data_skillcorner = {  
+            "Player": ["João", "Maria", "Pedro"],  
+            "Passes": [30, 20, 25],  
+            "Tackles": [5, 2, 3],  
+            "Minutes": [90, 85, 80]  
+        }  
+        df_wyscout = pd.DataFrame(data_wyscout)  
+        df_skillcorner = pd.DataFrame(data_skillcorner)  
+    else:  
         try:  
-            df_wyscout = pd.read_csv(wyscout_file) if wyscout_file.name.endswith('.csv') else pd.read_excel(wyscout_file)  
-            df_skillcorner = pd.read_csv(skillcorner_file) if skillcorner_file.name.endswith('.csv') else pd.read_excel(skillcorner_file)  
-  
-            redundant_cols = ['Player', 'player_id', 'ID', 'Name', 'player_name', 'Minutes', 'minutes', 'played_id']  
-            wyscout_players = df_wyscout["Player"].tolist()  
-            skillcorner_players = df_skillcorner["Player"].unique().tolist()  
-              
-            automatic_matches = {}  
-            mismatches = []  
-              
-            for skill_player in skillcorner_players:  
-                match = find_best_match(skill_player, wyscout_players)  
-                if match:  
-                    automatic_matches[skill_player] = match  
-                else:  
-                    mismatches.append(skill_player)  
-  
-            if mismatches:  
-                manual_matches = manual_link_interface(mismatches, wyscout_players)  
-                all_matches = {**automatic_matches, **manual_matches}  
-            else:  
-                all_matches = automatic_matches  
-  
-            if st.button("Gerar Excel"):  
-                df_skillcorner_matched = df_skillcorner.copy()  
-                df_skillcorner_matched["Player"] = df_skillcorner_matched["Player"].map(lambda x: all_matches.get(x, None))  
-                  
-                merged_df = pd.merge(df_wyscout, df_skillcorner_matched, on="Player", how="outer")  
-                final_df = merged_df.drop(columns=[col for col in redundant_cols if col in merged_df.columns])  
-                  
-                output = BytesIO()  
-                with pd.ExcelWriter(output, engine='openpyxl') as writer:  
-                    final_df.to_excel(writer, index=False)  
-                  
-                st.download_button(  
-                    "📥 Download Excel",  
-                    data=output.getvalue(),  
-                    file_name="metrics.xlsx",  
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"  
-                )  
-  
+            df_wyscout = pd.read_csv(wyscout_file) if wyscout_file and wyscout_file.name.endswith('.csv') else pd.read_excel(wyscout_file)  
+            df_skillcorner = pd.read_csv(skillcorner_file) if skillcorner_file and skillcorner_file.name.endswith('.csv') else pd.read_excel(skillcorner_file)  
         except Exception as e:  
-            st.error(f"Erro: {str(e)}")  
+            st.error("Erro ao carregar os arquivos: " + str(e))  
+            return  
+      
+    # Use matching if the player names might be slightly different  
+    wyscout_players = df_wyscout["Player"].tolist()  
+    skillcorner_players = df_skillcorner["Player"].unique().tolist()  
+      
+    automatic_matches = {}  
+    mismatches = []  
+    for skill_player in skillcorner_players:  
+        match = find_best_match(skill_player, wyscout_players)  
+        if match:  
+            automatic_matches[skill_player] = match  
+        else:  
+            mismatches.append(skill_player)  
+      
+    if mismatches:  
+        manual_matches = manual_link_interface(mismatches, wyscout_players)  
+        all_matches = {**automatic_matches, **manual_matches}  
+    else:  
+        all_matches = automatic_matches  
+      
+    # Button to generate the merged Excel  
+    if st.button("Gerar Excel"):  
+        df_skillcorner_matched = df_skillcorner.copy()  
+        # Map SkillCorner players according to matches found (if mapping is missing, the value remains None)  
+        df_skillcorner_matched["Player"] = df_skillcorner_matched["Player"].map(lambda x: all_matches.get(x, x))  
+          
+        # Merge the two dataframes on "Player"  
+        merged_df = pd.merge(df_wyscout, df_skillcorner_matched, on="Player", how="outer")  
+          
+        # Eliminar colunas redundantes como nome, minutos, player_id e similares  
+        redundant_cols = ['Player', 'player_id', 'ID', 'Name', 'player_name', 'Minutes', 'minutes', 'played_id']  
+        final_df = merged_df.drop(columns=[col for col in redundant_cols if col in merged_df.columns])  
+          
+        # Display the merged table for testing  
+        st.subheader("Tabela Mesclada")  
+        st.dataframe(final_df)  
+          
+        # Gerar arquivo Excel para download  
+        output = BytesIO()  
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:  
+            final_df.to_excel(writer, index=False)  
+        st.download_button(  
+            "📥 Download Excel",  
+            data=output.getvalue(),  
+            file_name="metrics.xlsx",  
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"  
+        )  
   
 if __name__ == "__main__":  
     main()  
+```▍
