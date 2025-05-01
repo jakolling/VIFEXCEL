@@ -1,4 +1,4 @@
-# Save the corrected app.py
+# Update app.py to use st.rerun() instead of experimental_rerun
 with open('app.py', 'w') as f:
     f.write("""import streamlit as st
 import pandas as pd
@@ -99,14 +99,14 @@ def main():
                         st.session_state.match_history.append(('confirm', current_player, selected_match))
                         st.session_state.auto_matched = False
                         st.session_state.suggested_match = None
-                        st.experimental_rerun()
+                        st.rerun()
                     
                     if st.button('❌ Reject Player'):
                         st.session_state.rejected_players.add(current_player)
                         st.session_state.match_history.append(('reject', current_player, None))
                         st.session_state.auto_matched = False
                         st.session_state.suggested_match = None
-                        st.experimental_rerun()
+                        st.rerun()
                 
                 with col_actions2:
                     if st.button('↩️ Undo Last', disabled=len(st.session_state.match_history) == 0):
@@ -120,7 +120,7 @@ def main():
                                 st.session_state.rejected_players.remove(player)
                             st.session_state.auto_matched = False
                             st.session_state.suggested_match = None
-                            st.experimental_rerun()
+                            st.rerun()
                 
                 st.write('### Progress')
                 progress = len(st.session_state.confirmed_matches) / len(wyscout_df['Player'].dropna().unique())
@@ -136,4 +136,4 @@ def main():
 if __name__ == '__main__':
     main()""")
 
-print("Updated app.py saved without syntax errors. Run with: streamlit run app.py")
+print("Updated app.py saved. Run with: streamlit run app.py")
