@@ -1,5 +1,4 @@
-# Create a new complete implementation file
-complete_code = """import streamlit as st
+import streamlit as st
 import pandas as pd
 import base64
 from io import BytesIO
@@ -238,10 +237,3 @@ if all([wyscout_file, physical_file, overcome_file]):
         st.success('All players have been matched or rejected!')
 else:
     st.info('Please upload all required files to begin matching')
-"""
-
-# Save the complete implementation to a new file
-with open('complete_player_matcher.py', 'w') as f:
-    f.write(complete_code)
-
-print("Complete implementation has been saved to 'complete_player_matcher.py'")
