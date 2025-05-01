@@ -35,14 +35,6 @@ def get_selection_index(current_selection, choices):
 st.set_page_config(layout="wide")
 st.title('Player Matching Tool')
 
-col1, col2, col3 = st.columns(3)
-with col1:
-    wyscout_file = st.file_uploader("Upload WyScout file", type=['xlsx','xls','csv'])
-with col2:
-    physical_file = st.file_uploader("Upload SkillCorner Physical Output file", type=['xlsx','xls','csv'])
-with col3:
-    overcome_file = st.file_uploader("Upload SkillCorner Overcome Pressure file", type=['xlsx','xls','csv'])
-
 if 'temp_selections' not in st.session_state:
     st.session_state.temp_selections = {}
 if 'confirmed_matches' not in st.session_state:
@@ -55,6 +47,14 @@ if 'auto_matched' not in st.session_state:
     st.session_state.auto_matched = False
 if 'match_history' not in st.session_state:
     st.session_state.match_history = deque(maxlen=10)
+
+col1, col2, col3 = st.columns(3)
+with col1:
+    wyscout_file = st.file_uploader("Upload WyScout file", type=['xlsx','xls','csv'])
+with col2:
+    physical_file = st.file_uploader("Upload SkillCorner Physical Output file", type=['xlsx','xls','csv'])
+with col3:
+    overcome_file = st.file_uploader("Upload SkillCorner Overcome Pressure file", type=['xlsx','xls','csv'])
 
 if all([wyscout_file, physical_file, overcome_file]):
     if wyscout_file.name.endswith('.csv'):
@@ -77,7 +77,6 @@ if all([wyscout_file, physical_file, overcome_file]):
         overcome_df['Player'].dropna()
     ]).unique().tolist()
     
-    # Filter out both rejected and confirmed players
     wyscout_players = [p for p in wyscout_df['Player'].dropna().unique() 
                       if p not in st.session_state.rejected_players and 
                       p not in st.session_state.confirmed_matches]
@@ -120,11 +119,13 @@ if all([wyscout_file, physical_file, overcome_file]):
         with col_nav1:
             if st.button('◀ Previous') and st.session_state.page_number > 0:
                 st.session_state.page_number -= 1
+                st.rerun()
         with col_nav2:
             st.write(f"Page {st.session_state.page_number + 1} of {max(1, total_pages)}")
         with col_nav3:
             if st.button('Next ▶') and st.session_state.page_number < total_pages - 1:
                 st.session_state.page_number += 1
+                st.rerun()
 
     st.markdown("---")
     st.write("### Match Players")
@@ -156,7 +157,7 @@ if all([wyscout_file, physical_file, overcome_file]):
                     if selection and selection != "-- None --":
                         st.session_state.match_history.append(('confirm', player, selection))
                         st.session_state.confirmed_matches[player] = selection
-                        st.experimental_rerun()
+                        st.rerun()
             
             with cols[3]:
                 if st.button("✗", key=f"reject_{player}", help="Reject player"):
@@ -166,7 +167,7 @@ if all([wyscout_file, physical_file, overcome_file]):
                         del st.session_state.temp_selections[player]
                     st.session_state.match_history.append(('reject', player, None))
                     st.session_state.rejected_players.add(player)
-                    st.experimental_rerun()
+                    st.rerun()
 
     st.markdown("---")
     col1, col2 = st.columns([2,1])
@@ -193,7 +194,7 @@ if all([wyscout_file, physical_file, overcome_file]):
                 st.session_state.auto_matched = False
                 st.session_state.rejected_players = set()
                 st.session_state.match_history.clear()
-                st.experimental_rerun()
+                st.rerun()
         
         with col_actions2:
             if st.button("↩️ Undo Last", help="Undo last match", disabled=len(st.session_state.match_history) == 0):
@@ -203,7 +204,7 @@ if all([wyscout_file, physical_file, overcome_file]):
                         del st.session_state.confirmed_matches[player]
                     elif action == 'reject':
                         st.session_state.rejected_players.remove(player)
-                    st.experimental_rerun()
+                    st.rerun()
         
         if st.button("📥 Export Data", help="Download matched data as Excel"):
             wyscout_df['Matched_Player'] = wyscout_df['Player'].map(st.session_state.confirmed_matches)
