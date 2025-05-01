@@ -16,6 +16,7 @@ st.markdown("""
 </style>  
 """, unsafe_allow_html=True)  
   
+# Novo algoritmo de matching aprimorado  
 def normalize_name(name):  
     if not isinstance(name, str):  
         return ''  
@@ -30,34 +31,29 @@ def get_name_variations(name):
     parts = normalized.split()  
     variations = {normalized}  
     if len(parts) > 1:  
-        # First + Last  
         variations.add(parts[0] + " " + parts[-1])  
-        # Last + First  
         variations.add(parts[-1] + " " + parts[0])  
-        # Initial + Last  
         variations.add(parts[0][0] + " " + parts[-1])  
-        # Last + Initial  
         variations.add(parts[-1] + " " + parts[0][0])  
-        # Just Last  
         variations.add(parts[-1])  
-        # First Initial + ... + Last (all initials except last and last name appended)  
         if len(parts) > 2:  
-            initials = ''.join(p[0] for p in parts[:-1])  
+            initials = ''.join([p[0] for p in parts[:-1]])  
             variations.add(initials + " " + parts[-1])  
     return variations  
   
 def calculate_match_score(name1, name2):  
-    n1_variations = get_name_variations(name1)  
-    n2_variations = get_name_variations(name2)  
-    if n1_variations.intersection(n2_variations):  
+    variations1 = get_name_variations(name1)  
+    variations2 = get_name_variations(name2)  
+    if variations1.intersection(variations2):  
         return 1.0  
     max_score = 0  
-    for v1 in n1_variations:  
-        for v2 in n2_variations:  
-            token_score = fuzz.token_sort_ratio(v1, v2) / 100  
-            partial_score = fuzz.partial_ratio(v1, v2) / 100  
-            ratio_score = fuzz.ratio(v1, v2) / 100  
-            score = max(token_score, partial_score, ratio_score)  
+    for v1 in variations1:  
+        for v2 in variations2:  
+            score = max(  
+                fuzz.token_sort_ratio(v1, v2) / 100,  
+                fuzz.partial_ratio(v1, v2) / 100,  
+                fuzz.ratio(v1, v2) / 100  
+            )  
             if score > max_score:  
                 max_score = score  
     return max_score  
@@ -94,92 +90,110 @@ def find_matches(source_df, target_df, threshold=0.85):
             })  
     return matches, unmatched, match_details  
   
-def process_dataframe(df):  
-    df = df.dropna(how='all').dropna(axis=1, how='all')  
-    if 'Player' not in df.columns:  
-        st.error("Column 'Player' not found")  
-        return None  
-    df = df.dropna(subset=['Player'])  
-    df['Player'] = df['Player'].astype(str).apply(lambda x: x.strip())  
+def add_suffix(df, suffix):  
+    cols = df.columns.tolist()  
+    new_cols = [col if col=='Player' else col + "_" + suffix for col in cols]  
+    df.columns = new_cols  
     return df  
   
-def add_suffix(df, suffix):  
-    return df.rename(columns={col: col + "_" + suffix for col in df.columns if col != 'Player'})  
+# Upload de arquivos  
+st.sidebar.header("Upload de Arquivos")  
+wyscout_file = st.sidebar.file_uploader("Escolha o arquivo Wyscout (Excel)", type=["xlsx"])  
+physical_file = st.sidebar.file_uploader("Escolha o arquivo de dados físicos (Excel)", type=["xlsx"])  
+pressure_file = st.sidebar.file_uploader("Escolha o arquivo de dados de pressão (Excel)", type=["xlsx"])  
   
-st.title("WyScout & SkillCorner Data Merger")  
-  
-col1, col2, col3 = st.columns(3)  
-  
-with col1:  
-    wyscout_file = st.file_uploader("WyScout Data", type=['xlsx', 'xls'], key='wyscout')  
-with col2:  
-    physical_file = st.file_uploader("SkillCorner Physical", type=['xlsx', 'xls'], key='physical')  
-with col3:  
-    pressure_file = st.file_uploader("SkillCorner Pressure", type=['xlsx', 'xls'], key='pressure')  
-  
-if all([wyscout_file, physical_file, pressure_file]):  
+if wyscout_file and physical_file and pressure_file:  
     try:  
-        df_wyscout = process_dataframe(pd.read_excel(wyscout_file))  
-        df_physical = process_dataframe(pd.read_excel(physical_file))  
-        df_pressure = process_dataframe(pd.read_excel(pressure_file))  
-        if all([df_wyscout is not None, df_physical is not None, df_pressure is not None]):  
-            st.success("✅ Files loaded successfully")  
-              
-            physical_matches, physical_unmatched, physical_details = find_matches(df_physical, df_wyscout)  
-            pressure_matches, pressure_unmatched, pressure_details = find_matches(df_pressure, df_wyscout)  
-              
-            if physical_unmatched or pressure_unmatched:  
-                st.warning("Manual matching required")  
-                tab1, tab2 = st.tabs(["Physical Output", "Pressure"])  
-                with tab1:  
-                    if physical_unmatched:  
-                        for unmatch in physical_unmatched:  
-                            player = unmatch['player']  
-                            st.write("Player: " + player)  
-                            st.write("Best matches found:")  
-                            for match, score in unmatch['best_matches']:  
-                                st.write("- " + match + " (Score: " + str(round(score,2)) + ")")  
-                            choose = st.selectbox("Select correct match", ["Select..."] + sorted(df_wyscout['Player'].unique().tolist()), key="physical_" + player)  
-                            if choose != "Select...":  
-                                physical_matches[player] = choose  
-                with tab2:  
-                    if pressure_unmatched:  
-                        for unmatch in pressure_unmatched:  
-                            player = unmatch['player']  
-                            st.write("Player: " + player)  
-                            st.write("Best matches found:")  
-                            for match, score in unmatch['best_matches']:  
-                                st.write("- " + match + " (Score: " + str(round(score,2)) + ")")  
-                            choose = st.selectbox("Select correct match", ["Select..."] + sorted(df_wyscout['Player'].unique().tolist()), key="pressure_" + player)  
-                            if choose != "Select...":  
-                                pressure_matches[player] = choose  
-            if st.button("Merge Data"):  
-                df_physical_matched = df_physical.copy()  
-                df_physical_matched['Player'] = df_physical_matched['Player'].map(physical_matches)  
-                df_physical_matched = add_suffix(df_physical_matched, "physical")  
-                  
-                df_pressure_matched = df_pressure.copy()  
-                df_pressure_matched['Player'] = df_pressure_matched['Player'].map(pressure_matches)  
-                df_pressure_matched = add_suffix(df_pressure_matched, "pressure")  
-                  
-                merged_df = pd.merge(df_wyscout, df_physical_matched, on="Player", how="inner")  
-                final_df = pd.merge(merged_df, df_pressure_matched, on="Player", how="inner")  
-                  
-                output = BytesIO()  
-                with pd.ExcelWriter(output, engine="openpyxl") as writer:  
-                    final_df.to_excel(writer, index=False)  
-                st.download_button("📥 Download Merged Data", data=output.getvalue(), file_name="merged_data.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")  
-                st.success("✅ Merged " + str(len(final_df)) + " players")  
-                st.dataframe(final_df.head())  
-                  
-                col1, col2, col3 = st.columns(3)  
-                with col1:  
-                    st.metric("Total Players", len(final_df))  
-                with col2:  
-                    st.metric("Auto Matches", str(len(physical_matches) - len(physical_unmatched)))  
-                with col3:  
-                    st.metric("Manual Matches", str(len(physical_unmatched)))  
+        df_wyscout = pd.read_excel(wyscout_file)  
+        df_physical = pd.read_excel(physical_file)  
+        df_pressure = pd.read_excel(pressure_file)  
     except Exception as e:  
-        st.error("Error: " + str(e))  
+        st.error("Erro ao ler os arquivos: " + str(e))  
+    else:  
+        st.success("Arquivos carregados com sucesso!")  
+  
+    st.subheader("Matching de Nomes")  
+  
+    physical_matches, physical_unmatched, physical_details = find_matches(df_physical, df_wyscout, threshold=0.85)  
+    pressure_matches, pressure_unmatched, pressure_details = find_matches(df_pressure, df_wyscout, threshold=0.85)  
+  
+    st.write("##### Auto-matches Físicos")  
+    st.write(physical_matches)  
+    st.write("##### Auto-matches de Pressão")  
+    st.write(pressure_matches)  
+  
+    tab1, tab2 = st.tabs(["Ajustar Físicos", "Ajustar Pressão"])  
+    physical_manual = {}  
+    pressure_manual = {}  
+    with tab1:  
+        if physical_unmatched:  
+            st.write("Ajuste manual para os seguintes jogadores de dados físicos:")  
+            for unmatch in physical_unmatched:  
+                player = unmatch["player"]  
+                st.write("Jogador:", player)  
+                st.write("Melhores matches encontrados:")  
+                for match, score in unmatch["best_matches"]:  
+                    st.write("- " + match + " (Score: " + str(round(score,2)) + ")")  
+                choose = st.selectbox("Selecione o match correto",  
+                                        ["Select..."] + sorted(df_wyscout["Player"].unique().tolist()),  
+                                        key="physical_" + player)  
+                if choose != "Select...":  
+                    physical_manual[player] = choose  
+        else:  
+            st.write("Todos os jogadores de dados físicos foram auto-matched.")  
+    with tab2:  
+        if pressure_unmatched:  
+            st.write("Ajuste manual para os seguintes jogadores de dados de pressão:")  
+            for unmatch in pressure_unmatched:  
+                player = unmatch["player"]  
+                st.write("Jogador:", player)  
+                st.write("Melhores matches encontrados:")  
+                for match, score in unmatch["best_matches"]:  
+                    st.write("- " + match + " (Score: " + str(round(score,2)) + ")")  
+                choose = st.selectbox("Selecione o match correto",  
+                                        ["Select..."] + sorted(df_wyscout["Player"].unique().tolist()),  
+                                        key="pressure_" + player)  
+                if choose != "Select...":  
+                    pressure_manual[player] = choose  
+        else:  
+            st.write("Todos os jogadores de dados de pressão foram auto-matched.")  
+  
+    # Atualiza os matches com correções manuais  
+    for k, v in physical_manual.items():  
+        physical_matches[k] = v  
+    for k, v in pressure_manual.items():  
+        pressure_matches[k] = v  
+  
+    if st.button("Merge Data"):  
+        df_physical_matched = df_physical.copy()  
+        df_physical_matched["Player"] = df_physical_matched["Player"].map(physical_matches)  
+        df_physical_matched = add_suffix(df_physical_matched, "physical")  
+          
+        df_pressure_matched = df_pressure.copy()  
+        df_pressure_matched["Player"] = df_pressure_matched["Player"].map(pressure_matches)  
+        df_pressure_matched = add_suffix(df_pressure_matched, "pressure")  
+          
+        merged_df = pd.merge(df_wyscout, df_physical_matched, on="Player", how="inner")  
+        final_df = pd.merge(merged_df, df_pressure_matched, on="Player", how="inner")  
+          
+        output = BytesIO()  
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:  
+            final_df.to_excel(writer, index=False)  
+          
+        st.download_button("📥 Download Merged Data",   
+                           data=output.getvalue(),   
+                           file_name="merged_data.xlsx",   
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")  
+          
+        st.success("✅ Mesclados " + str(len(final_df)) + " jogadores")  
+        st.dataframe(final_df.head())  
+          
+        col1, col2, col3 = st.columns(3)  
+        with col1:  
+            st.metric("Total Players", len(final_df))  
+        with col2:  
+            st.metric("Auto Matches (Físicos)", str(len(physical_matches) - len(physical_unmatched)))  
+        with col3:  
+            st.metric("Auto Matches (Pressão)", str(len(pressure_matches) - len(pressure_unmatched)))  
 else:  
-    st.info("👆 Upload all three Excel files")  
+    st.info("👆 Faça upload dos três arquivos Excel")  
