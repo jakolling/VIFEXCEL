@@ -3,14 +3,17 @@ import pandas as pd
 from io import BytesIO  
 from difflib import SequenceMatcher  
   
+# Função para calcular similaridade entre nomes  
 def name_similarity(a, b):  
     return SequenceMatcher(None, a.lower(), b.lower()).ratio()  
   
+# Função para encontrar o melhor match, com threshold default de 0.7  
 def find_best_match(name, candidates, threshold=0.7):  
     matches = [(c, name_similarity(name, c)) for c in candidates]  
     best_match = max(matches, key=lambda x: x[1])  
     return best_match[0] if best_match[1] >= threshold else None  
   
+# Interface para selecção manual dos matches que não foram encontrados automaticamente  
 def manual_link_interface(mismatched_players, wyscout_players):  
     st.subheader("Resolver Mismatches")  
     manual_links = {}  
@@ -28,11 +31,12 @@ def manual_link_interface(mismatched_players, wyscout_players):
 def main():  
     st.title("Merge de Métricas de Performance")  
       
+    # Upload dos arquivos  
     wyscout_file = st.file_uploader("Arquivo WyScout", type=['csv', 'xlsx'])  
     skillcorner_file = st.file_uploader("Arquivo SkillCorner", type=['csv', 'xlsx'])  
       
     if not wyscout_file and not skillcorner_file:  
-        st.info("Usando conjuntos de dados de exemplo")  
+        st.info("Utilizando conjuntos de dados de exemplo")  
         data_wyscout = {  
             "Player": ["João", "Maria", "Carlos"],  
             "Goals": [2, 1, 0],  
@@ -57,7 +61,7 @@ def main():
             st.error("Erro ao carregar os arquivos: " + str(e))  
             return  
   
-    # Matching automático de jogadores via similaridade  
+    # Processo de matching dos jogadores  
     wyscout_players = df_wyscout["Player"].tolist()  
     skillcorner_players = df_skillcorner["Player"].unique().tolist()  
       
@@ -75,19 +79,20 @@ def main():
         all_matches = {**automatic_matches, **manual_matches}  
     else:  
         all_matches = automatic_matches  
-  
+      
     if st.button("Gerar Excel"):  
+        # Mapear os nomes do SkillCorner para os nomes encontrados no WyScout  
         df_skillcorner_matched = df_skillcorner.copy()  
-        df_skillcorner_matched["Player"] = df_skillcorner_matched["Player"].map(lambda x: all_matches.get(x, None))  
+        df_skillcorner_matched["Player"] = df_skillcorner_matched["Player"].map(lambda x: all_matches.get(x, x))  
           
+        # Mesclar os dataframes com base na coluna "Player"  
         merged_df = pd.merge(df_wyscout, df_skillcorner_matched, on="Player", how="outer")  
           
-        # Eliminar colunas redundantes, como nome, minutos e IDs desnecessários  
-        redundant_cols = ['Player', 'player_id', 'ID', 'Name', 'player_name',   
-                          'Minutes', 'minutes', 'played_id', 'nome', 'minutos']  
+        # Remover colunas redundantes: nome, minutos, IDs e outras colunas não relativas às métricas  
+        redundant_cols = ['Player', 'player_id', 'ID', 'Name', 'player_name', 'Minutes', 'minutes', 'played_id', 'nome', 'minutos']  
         final_df = merged_df.drop(columns=[col for col in redundant_cols if col in merged_df.columns])  
           
-        st.subheader("Tabela Mesclada (Apenas Métricas)")  
+        st.subheader("Tabela Mesclada (Somente Métricas)")  
         st.dataframe(final_df)  
           
         output = BytesIO()  
