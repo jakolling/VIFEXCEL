@@ -188,7 +188,7 @@ if all([wyscout_file, physical_file]):
                 right_on='Player',
                 how='left',
                 suffixes=('_WyScout', '_Physical')
-            ).dropna(subset=['Player'])
+            ).dropna(subset=['Player_Physical'])
 
             download = download_link(final_df, 'matched_players.xlsx', '📥 Download Excel File')
             st.markdown(download, unsafe_allow_html=True)
