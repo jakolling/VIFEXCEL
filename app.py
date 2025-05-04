@@ -61,7 +61,7 @@ if 'auto_matched' not in st.session_state:
 if 'suggested_match' not in st.session_state:
     st.session_state.suggested_match = None
 
-# File upload (apenas 2 arquivos)
+# File upload (2 arquivos)
 col1, col2 = st.columns(2)
 with col1:
     wyscout_file = st.file_uploader("Upload WyScout file", type=['xlsx','xls','csv'])
@@ -79,7 +79,7 @@ if all([wyscout_file, physical_file]):
     else:
         physical_df = pd.read_excel(physical_file)
 
-    all_skillcorner_players = physical_df['Player'].dropna().unique().tolist()  # Removido overcome_df
+    all_skillcorner_players = physical_df['Player'].dropna().unique().tolist()
 
     available_skillcorner_players = [p for p in all_skillcorner_players 
                                      if p not in st.session_state.matched_skillcorner_players]
@@ -89,7 +89,7 @@ if all([wyscout_file, physical_file]):
                        p not in st.session_state.confirmed_matches]
 
     st.write("### Select Metrics")
-    selected_physical = st.multiselect(  # Removido seção Overcome
+    selected_physical = st.multiselect(
         "Physical Output metrics:",
         [col for col in physical_df.columns if col != 'Player'],
         default=[col for col in physical_df.columns if col != 'Player']
@@ -175,23 +175,26 @@ if all([wyscout_file, physical_file]):
             st.rerun()
 
         if st.button("📥 Export Data", help="Download matched data as Excel"):
-            wyscout_df['Matched_Player'] = wyscout_df['Player'].map(st.session_state.confirmed_matches)
-            wyscout_matched = wyscout_df.dropna(subset=['Matched_Player'])
+            if st.session_state.confirmed_matches:
+                wyscout_df['Matched_Player'] = wyscout_df['Player'].map(st.session_state.confirmed_matches)
+                wyscout_matched = wyscout_df.dropna(subset=['Matched_Player'])
 
-            physical_subset = physical_df[['Player'] + selected_physical]
+                # Renomear coluna antes do merge
+                physical_subset = physical_df[['Player'] + selected_physical].rename(columns={'Player': 'Player_Physical'})
 
-            # Merge apenas com physical_df (removido overcome_df)
-            final_df = pd.merge(
-                wyscout_matched,
-                physical_subset,
-                left_on='Matched_Player',
-                right_on='Player',
-                how='left',
-                suffixes=('_WyScout', '_Physical')
-            ).dropna(subset=['Player_Physical'])
+                # Fazer o merge com a coluna renomeada
+                final_df = pd.merge(
+                    wyscout_matched,
+                    physical_subset,
+                    left_on='Matched_Player',
+                    right_on='Player_Physical',
+                    how='left'
+                ).dropna(subset=['Player_Physical'])
 
-            download = download_link(final_df, 'matched_players.xlsx', '📥 Download Excel File')
-            st.markdown(download, unsafe_allow_html=True)
+                download = download_link(final_df, 'matched_players.xlsx', '📥 Download Excel File')
+                st.markdown(download, unsafe_allow_html=True)
+            else:
+                st.warning("No matches to export!")
 
         st.write("### Rejected Players")
         if st.session_state.rejected_players:
