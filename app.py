@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import base64
@@ -62,16 +61,14 @@ if 'auto_matched' not in st.session_state:
 if 'suggested_match' not in st.session_state:
     st.session_state.suggested_match = None
 
-# File upload
-col1, col2, col3 = st.columns(3)
+# File upload (apenas 2 arquivos)
+col1, col2 = st.columns(2)
 with col1:
     wyscout_file = st.file_uploader("Upload WyScout file", type=['xlsx','xls','csv'])
 with col2:
     physical_file = st.file_uploader("Upload SkillCorner Physical Output file", type=['xlsx','xls','csv'])
-with col3:
-    overcome_file = st.file_uploader("Upload SkillCorner Overcome Pressure file", type=['xlsx','xls','csv'])
 
-if all([wyscout_file, physical_file, overcome_file]):
+if all([wyscout_file, physical_file]):
     if wyscout_file.name.endswith('.csv'):
         wyscout_df = pd.read_csv(wyscout_file)
     else:
@@ -82,15 +79,7 @@ if all([wyscout_file, physical_file, overcome_file]):
     else:
         physical_df = pd.read_excel(physical_file)
 
-    if overcome_file.name.endswith('.csv'):
-        overcome_df = pd.read_csv(overcome_file)
-    else:
-        overcome_df = pd.read_excel(overcome_file)
-
-    all_skillcorner_players = pd.concat([
-        physical_df['Player'].dropna(),
-        overcome_df['Player'].dropna()
-    ]).unique().tolist()
+    all_skillcorner_players = physical_df['Player'].dropna().unique().tolist()  # Removido overcome_df
 
     available_skillcorner_players = [p for p in all_skillcorner_players 
                                      if p not in st.session_state.matched_skillcorner_players]
@@ -100,23 +89,11 @@ if all([wyscout_file, physical_file, overcome_file]):
                        p not in st.session_state.confirmed_matches]
 
     st.write("### Select Metrics")
-    col_metrics1, col_metrics2 = st.columns(2)
-
-    with col_metrics1:
-        physical_cols = [col for col in physical_df.columns if col != 'Player']
-        selected_physical = st.multiselect(
-            "Physical Output metrics:",
-            physical_cols,
-            default=physical_cols
-        )
-
-    with col_metrics2:
-        overcome_cols = [col for col in overcome_df.columns if col != 'Player']
-        selected_overcome = st.multiselect(
-            "Overcome Pressure metrics:",
-            overcome_cols,
-            default=overcome_cols
-        )
+    selected_physical = st.multiselect(  # Removido seção Overcome
+        "Physical Output metrics:",
+        [col for col in physical_df.columns if col != 'Player'],
+        default=[col for col in physical_df.columns if col != 'Player']
+    )
 
     if wyscout_players:
         current_player = wyscout_players[0]
@@ -187,42 +164,30 @@ if all([wyscout_file, physical_file, overcome_file]):
 
     with col2:
         st.write("### Actions")
-        col_actions1, col_actions2 = st.columns(2)
-
-        with col_actions1:
-            if st.button("🔄 Reset All", help="Clear all matches and start over"):
-                st.session_state.temp_selections = {}
-                st.session_state.confirmed_matches = {}
-                st.session_state.auto_matched = False
-                st.session_state.rejected_players = set()
-                st.session_state.match_history = []
-                st.session_state.matched_skillcorner_players = set()
-                st.session_state.suggested_match = None
-                st.rerun()
+        if st.button("🔄 Reset All", help="Clear all matches and start over"):
+            st.session_state.temp_selections = {}
+            st.session_state.confirmed_matches = {}
+            st.session_state.auto_matched = False
+            st.session_state.rejected_players = set()
+            st.session_state.match_history = []
+            st.session_state.matched_skillcorner_players = set()
+            st.session_state.suggested_match = None
+            st.rerun()
 
         if st.button("📥 Export Data", help="Download matched data as Excel"):
             wyscout_df['Matched_Player'] = wyscout_df['Player'].map(st.session_state.confirmed_matches)
             wyscout_matched = wyscout_df.dropna(subset=['Matched_Player'])
 
             physical_subset = physical_df[['Player'] + selected_physical]
-            overcome_subset = overcome_df[['Player'] + selected_overcome]
 
-            merged_df = pd.merge(
+            # Merge apenas com physical_df (removido overcome_df)
+            final_df = pd.merge(
                 wyscout_matched,
                 physical_subset,
                 left_on='Matched_Player',
                 right_on='Player',
                 how='left',
                 suffixes=('_WyScout', '_Physical')
-            )
-
-            final_df = pd.merge(
-                merged_df,
-                overcome_subset,
-                left_on='Matched_Player',
-                right_on='Player',
-                how='left',
-                suffixes=('', '_Overcome')
             ).dropna(subset=['Player'])
 
             download = download_link(final_df, 'matched_players.xlsx', '📥 Download Excel File')
@@ -235,4 +200,4 @@ if all([wyscout_file, physical_file, overcome_file]):
                 st.write(sorted(list(st.session_state.rejected_players)))
 
 else:
-    st.info("Please upload all required files to begin matching")
+    st.info("Please upload both files to begin matching")
