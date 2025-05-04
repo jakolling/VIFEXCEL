@@ -4,273 +4,260 @@ import base64
 from io import BytesIO
 from thefuzz import fuzz, process
 
-# ===================================================
-# FUNÇÕES AUXILIARES
-# ===================================================
+def to_excel(df):
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name='MatchedData')
+    return output.getvalue()
 
-def converter_dataframe_para_excel(dataframe):
-    buffer = BytesIO()
-    with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-        dataframe.to_excel(writer, index=False)
-    return buffer.getvalue()
+def download_link(object_to_download, download_filename, download_link_text):
+    if isinstance(object_to_download, pd.DataFrame):
+        object_to_download = to_excel(object_to_download)
+    b64 = base64.b64encode(object_to_download).decode()
+    return f'<a href="data:application/octet-stream;base64,{b64}" download="{download_filename}">{download_link_text}</a>'
 
-def gerar_link_download(dataframe, nome_arquivo, texto_link):
-    dados_excel = converter_dataframe_para_excel(dataframe)
-    b64 = base64.b64encode(dados_excel).decode()
-    return f'<a href="data:application/octet-stream;base64,{b64}" download="{nome_arquivo}">{texto_link}</a>'
-
-def encontrar_melhor_correspondencia(nome_jogador, lista_candidatos, pontuacao_minima=70):
-    try:
-        if not isinstance(nome_jogador, str) or not lista_candidatos:
-            return None
-        
-        partes_nome = nome_jogador.strip().split()
-        if len(partes_nome) < 2:
-            return None
-        
-        primeira_letra = partes_nome[0][0].lower()
-        ultimo_nome = partes_nome[-1].lower()
-        
-        # Primeiro filtro: primeira letra e último nome
-        candidatos_filtrados = [
-            candidato for candidato in lista_candidatos
-            if isinstance(candidato, str) and
-            len(candidato.split()) >= 1 and
-            candidato.split()[0][0].lower() == primeira_letra and
-            candidato.lower().endswith(ultimo_nome)
-        ]
-        
-        # Segundo filtro: apenas primeira letra se o primeiro falhar
-        if not candidatos_filtrados:
-            candidatos_filtrados = [
-                candidato for candidato in lista_candidatos
-                if isinstance(candidato, str) and
-                len(candidato.split()) >= 1 and
-                candidato.split()[0][0].lower() == primeira_letra
-            ]
-        
-        if candidatos_filtrados:
-            melhor_match = process.extractOne(nome_jogador, candidatos_filtrados, scorer=fuzz.token_sort_ratio)
-            return melhor_match[0] if melhor_match and melhor_match[1] >= pontuacao_minima else None
-        
+def find_best_match(name, choices, min_score=65):
+    if not isinstance(name, str) or not choices:
         return None
-    except Exception as e:
-        st.error(f"Erro na correspondência: {str(e)}")
+    name_parts = name.strip().split()
+    if len(name_parts) < 2:
         return None
+    first_letter = name_parts[0][0].lower()
+    last_name = name_parts[-1].lower()
+    filtered_choices = [c for c in choices if isinstance(c, str) and len(c.split()) > 0 and
+                        c.split()[0][0].lower() == first_letter and c.lower().endswith(last_name)]
+    if not filtered_choices:
+        filtered_choices = [c for c in choices if isinstance(c, str) and len(c.split()) > 0 and
+                            c.split()[0][0].lower() == first_letter]
+    if filtered_choices:
+        best_match = process.extractOne(name, filtered_choices, scorer=fuzz.token_sort_ratio)
+        return best_match[0] if best_match and best_match[1] >= min_score else None
+    return None
 
-# ===================================================
-# CONFIGURAÇÃO DA PÁGINA
-# ===================================================
-
-st.set_page_config(
-    page_title="Sistema de Integração de Dados Esportivos",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# ===================================================
-# GERENCIAMENTO DE ESTADO DA SESSÃO
-# ===================================================
-
-if 'correspondencias_confirmadas' not in st.session_state:
-    st.session_state.correspondencias_confirmadas = {}
-
-if 'jogadores_rejeitados' not in st.session_state:
-    st.session_state.jogadores_rejeitados = set()
-
-if 'historico_acoes' not in st.session_state:
-    st.session_state.historico_acoes = []
-
-if 'jogadores_processados' not in st.session_state:
-    st.session_state.jogadores_processados = set()
-
-# ===================================================
-# COMPONENTES DE INTERFACE
-# ===================================================
-
-st.title("📊 Integrador de Bases de Dados Esportivos")
-
-# Seção de upload de arquivos
-with st.expander("📤 Carregamento de Arquivos", expanded=True):
-    coluna_esquerda, coluna_direita = st.columns(2)
-    
-    with coluna_esquerda:
-        arquivo_wyscout = st.file_uploader(
-            "Selecione o arquivo WyScout (CSV ou Excel)",
-            type=['csv', 'xlsx', 'xls']
-        )
-    
-    with coluna_direita:
-        arquivos_skillcorner = st.file_uploader(
-            "Selecione os arquivos SkillCorner (Physical/Overcome)",
-            type=['csv', 'xlsx', 'xls'],
-            accept_multiple_files=True
-        )
-
-# ===================================================
-# PROCESSAMENTO PRINCIPAL
-# ===================================================
-
-if arquivo_wyscout and arquivos_skillcorner:
+def get_selection_index(current_selection, choices):
     try:
-        # Carregar dados WyScout
-        if arquivo_wyscout.name.endswith('.csv'):
-            df_wyscout = pd.read_csv(arquivo_wyscout)
+        if current_selection and current_selection != "-- None --" and current_selection in choices:
+            return choices.index(current_selection) + 1
+    except (ValueError, TypeError):
+        pass
+    return 0
+
+st.set_page_config(layout="wide")
+st.title('Player Matching Tool')
+
+# Session state setup
+if 'temp_selections' not in st.session_state:
+    st.session_state.temp_selections = {}
+if 'confirmed_matches' not in st.session_state:
+    st.session_state.confirmed_matches = {}
+if 'rejected_players' not in st.session_state:
+    st.session_state.rejected_players = set()
+if 'match_history' not in st.session_state:
+    st.session_state.match_history = []
+if 'matched_skillcorner_players' not in st.session_state:
+    st.session_state.matched_skillcorner_players = set()
+if 'auto_matched' not in st.session_state:
+    st.session_state.auto_matched = False
+if 'suggested_match' not in st.session_state:
+    st.session_state.suggested_match = None
+
+# File upload
+col1, col2 = st.columns(2)
+with col1:
+    wyscout_file = st.file_uploader("Upload WyScout file", type=['xlsx','xls','csv'])
+with col2:
+    skillcorner_files = st.file_uploader(
+        "Upload SkillCorner Files (Physical/Overcome)", 
+        type=['xlsx','xls','csv'], 
+        accept_multiple_files=True
+    )
+
+if wyscout_file and skillcorner_files:
+    # Initialize DataFrames
+    physical_df, overcome_df = None, None
+    
+    # Read SkillCorner files
+    for file in skillcorner_files:
+        if "physical" in file.name.lower():
+            if file.name.endswith('.csv'):
+                physical_df = pd.read_csv(file)
+            else:
+                physical_df = pd.read_excel(file)
+        elif "overcome" in file.name.lower():
+            if file.name.endswith('.csv'):
+                overcome_df = pd.read_csv(file)
+            else:
+                overcome_df = pd.read_excel(file)
+    
+    # Read WyScout file
+    if wyscout_file.name.endswith('.csv'):
+        wyscout_df = pd.read_csv(wyscout_file)
+    else:
+        wyscout_df = pd.read_excel(wyscout_file)
+
+    # Combine SkillCorner players
+    all_skillcorner_players = []
+    if physical_df is not None:
+        all_skillcorner_players.extend(physical_df['Player'].dropna().tolist())
+    if overcome_df is not None:
+        all_skillcorner_players.extend(overcome_df['Player'].dropna().tolist())
+    all_skillcorner_players = list(set(all_skillcorner_players))  # Remove duplicates
+
+    available_skillcorner_players = [
+        p for p in all_skillcorner_players 
+        if p not in st.session_state.matched_skillcorner_players
+    ]
+
+    wyscout_players = [
+        p for p in wyscout_df['Player'].dropna().unique()
+        if p not in st.session_state.rejected_players and
+        p not in st.session_state.confirmed_matches
+    ]
+
+    st.write("### Select Metrics")
+    col_metrics1, col_metrics2 = st.columns(2)
+
+    # Dynamic metric selection based on loaded files
+    selected_physical, selected_overcome = [], []
+    
+    with col_metrics1:
+        if physical_df is not None:
+            physical_cols = [col for col in physical_df.columns if col != 'Player']
+            selected_physical = st.multiselect(
+                "Physical Output metrics:",
+                physical_cols,
+                default=physical_cols
+            )
+
+    with col_metrics2:
+        if overcome_df is not None:
+            overcome_cols = [col for col in overcome_df.columns if col != 'Player']
+            selected_overcome = st.multiselect(
+                "Overcome Pressure metrics:",
+                overcome_cols,
+                default=overcome_cols
+            )
+
+    if wyscout_players:
+        current_player = wyscout_players[0]
+        st.subheader(f"🎯 Match Player: {current_player}")
+
+        if not st.session_state.auto_matched:
+            best_match = find_best_match(current_player, available_skillcorner_players)
+            st.session_state.suggested_match = best_match
+            st.session_state.auto_matched = True
+
+        col_match, col_c1, col_c2 = st.columns([2, 1, 1])
+        with col_match:
+            selection_index = get_selection_index(st.session_state.suggested_match, available_skillcorner_players)
+            selection = st.selectbox(
+                "Match with:",
+                [""] + available_skillcorner_players,
+                index=selection_index
+            )
+
+        with col_c1:
+            confirm_disabled = not selection or (physical_df is None and overcome_df is None)
+            if st.button("✅ Confirm Match", disabled=confirm_disabled):
+                st.session_state.confirmed_matches[current_player] = selection
+                st.session_state.matched_skillcorner_players.add(selection)
+                st.session_state.match_history.append(('confirm', current_player, selection))
+                st.session_state.auto_matched = False
+                st.session_state.suggested_match = None
+                st.rerun()
+
+            if st.button("❌ Reject Player"):
+                st.session_state.rejected_players.add(current_player)
+                st.session_state.match_history.append(('reject', current_player, None))
+                st.session_state.auto_matched = False
+                st.session_state.suggested_match = None
+                st.rerun()
+
+        with col_c2:
+            undo_disabled = len(st.session_state.match_history) == 0
+            if st.button("↩️ Undo Last", disabled=undo_disabled):
+                action, player, match = st.session_state.match_history.pop()
+                if action == 'confirm':
+                    st.session_state.matched_skillcorner_players.remove(match)
+                    del st.session_state.confirmed_matches[player]
+                elif action == 'reject':
+                    st.session_state.rejected_players.remove(player)
+                st.session_state.auto_matched = False
+                st.session_state.suggested_match = None
+                st.rerun()
+
+        st.markdown("---")
+        progress = len(st.session_state.confirmed_matches) / len(wyscout_df['Player'].dropna().unique())
+        st.progress(progress)
+        st.write(f"Matched: {len(st.session_state.confirmed_matches)} of {len(wyscout_df['Player'].dropna().unique())} players")
+    else:
+        st.success("✅ All players have been matched or rejected!")
+
+    st.markdown("---")
+    col1, col2 = st.columns([2,1])
+
+    with col1:
+        st.write("### Confirmed Matches")
+        if st.session_state.confirmed_matches:
+            confirmed_df = pd.DataFrame(
+                list(st.session_state.confirmed_matches.items()),
+                columns=['WyScout Player', 'SkillCorner Player']
+            )
+            st.dataframe(confirmed_df, use_container_width=True)
         else:
-            df_wyscout = pd.read_excel(arquivo_wyscout, engine='openpyxl' if arquivo_wyscout.name.endswith('.xlsx') else 'xlrd')
-        
-        # Verificar estrutura do arquivo WyScout
-        if 'Player' not in df_wyscout.columns:
-            st.error("Erro: O arquivo WyScout não contém a coluna 'Player'")
-            st.stop()
-        
-        # Carregar dados SkillCorner
-        df_physical = None
-        df_overcome = None
-        
-        for arquivo in arquivos_skillcorner:
-            if 'physical' in arquivo.name.lower():
-                if arquivo.name.endswith('.csv'):
-                    df_physical = pd.read_csv(arquivo)
-                else:
-                    df_physical = pd.read_excel(arquivo, engine='openpyxl' if arquivo.name.endswith('.xlsx') else 'xlrd')
-            
-            elif 'overcome' in arquivo.name.lower():
-                if arquivo.name.endswith('.csv'):
-                    df_overcome = pd.read_csv(arquivo)
-                else:
-                    df_overcome = pd.read_excel(arquivo, engine='openpyxl' if arquivo.name.endswith('.xlsx') else 'xlrd')
-        
-        # Validar arquivos SkillCorner
-        for df, nome in zip([df_physical, df_overcome], ['Physical', 'Overcome']):
-            if df is not None and 'Player' not in df.columns:
-                st.error(f"Erro: O arquivo {nome} não contém a coluna 'Player'")
-                st.stop()
-        
-        # Combinar jogadores SkillCorner
-        jogadores_skillcorner = []
-        if df_physical is not None:
-            jogadores_skillcorner.extend(df_physical['Player'].dropna().unique().tolist())
-        if df_overcome is not None:
-            jogadores_skillcorner.extend(df_overcome['Player'].dropna().unique().tolist())
-        jogadores_skillcorner = list(set(jogadores_skillcorner))
-        
-        # Obter lista de jogadores para processar
-        jogadores_wyscout = [
-            jogador for jogador in df_wyscout['Player'].unique()
-            if jogador not in st.session_state.jogadores_rejeitados
-            and jogador not in st.session_state.correspondencias_confirmadas
-        ]
-        
-        # Seção de correspondência
-        if jogadores_wyscout:
-            jogador_atual = jogadores_wyscout[0]
-            
-            with st.container():
-                st.subheader(f"🔍 Correspondência para: {jogador_atual}")
-                
-                # Encontrar correspondência sugerida
-                correspondencia_sugerida = encontrar_melhor_correspondencia(
-                    jogador_atual,
-                    [j for j in jogadores_skillcorner if j not in st.session_state.jogadores_processados]
+            st.info("No matches confirmed yet")
+
+    with col2:
+        st.write("### Actions")
+        col_actions1, col_actions2 = st.columns(2)
+
+        with col_actions1:
+            if st.button("🔄 Reset All", help="Clear all matches and start over"):
+                st.session_state.temp_selections = {}
+                st.session_state.confirmed_matches = {}
+                st.session_state.auto_matched = False
+                st.session_state.rejected_players = set()
+                st.session_state.match_history = []
+                st.session_state.matched_skillcorner_players = set()
+                st.session_state.suggested_match = None
+                st.rerun()
+
+        if st.button("📥 Export Data", help="Download matched data as Excel"):
+            wyscout_df['Matched_Player'] = wyscout_df['Player'].map(st.session_state.confirmed_matches)
+            wyscout_matched = wyscout_df.dropna(subset=['Matched_Player'])
+
+            final_df = wyscout_matched.copy()
+
+            if physical_df is not None:
+                physical_subset = physical_df[['Player'] + selected_physical]
+                final_df = pd.merge(
+                    final_df,
+                    physical_subset,
+                    left_on='Matched_Player',
+                    right_on='Player',
+                    how='left',
+                    suffixes=('_WyScout', '_Physical')
                 )
-                
-                # Interface de seleção
-                coluna_selecao, coluna_controles = st.columns([3, 1])
-                
-                with coluna_selecao:
-                    opcoes = [""] + [j for j in jogadores_skillcorner if j not in st.session_state.jogadores_processados]
-                    indice_padrao = opcoes.index(correspondencia_sugerida) + 1 if correspondencia_sugerida in opcoes else 0
-                    selecao = st.selectbox(
-                        "Selecione o jogador correspondente:",
-                        options=opcoes,
-                        index=indice_padrao
-                    )
-                
-                with coluna_controles:
-                    # Botão de confirmação
-                    if st.button("✅ Confirmar", help="Confirma a correspondência selecionada"):
-                        if selecao:
-                            st.session_state.correspondencias_confirmadas[jogador_atual] = selecao
-                            st.session_state.jogadores_processados.add(selecao)
-                            st.session_state.historico_acoes.append(('confirmacao', jogador_atual, selecao))
-                            st.rerun()
-                    
-                    # Botão de rejeição
-                    if st.button("❌ Rejeitar", help="Rejeita o jogador atual"):
-                        st.session_state.jogadores_rejeitados.add(jogador_atual)
-                        st.session_state.historico_acoes.append(('rejeicao', jogador_atual, None))
-                        st.rerun()
-                    
-                    # Botão de desfazer
-                    if st.button("↩️ Desfazer", disabled=not st.session_state.historico_acoes):
-                        ultima_acao = st.session_state.historico_acoes.pop()
-                        if ultima_acao[0] == 'confirmacao':
-                            del st.session_state.correspondencias_confirmadas[ultima_acao[1]]
-                            st.session_state.jogadores_processados.remove(ultima_acao[2])
-                        elif ultima_acao[0] == 'rejeicao':
-                            st.session_state.jogadores_rejeitados.remove(ultima_acao[1])
-                        st.rerun()
-                
-                # Exibir progresso
-                progresso = len(st.session_state.correspondencias_confirmadas) / len(df_wyscout['Player'].unique())
-                st.progress(progresso)
-                st.caption(f"Progresso: {len(st.session_state.correspondencias_confirmadas)} de {len(df_wyscout['Player'].unique())} jogadores processados")
-        
-        else:
-            st.success("✅ Todos os jogadores foram processados com sucesso!")
-        
-        # Seção de exportação
-        with st.expander("📥 Exportação de Dados", expanded=False):
-            if st.button("Gerar Arquivo Final"):
-                df_final = df_wyscout.copy()
-                
-                # Adicionar dados físicos
-                if df_physical is not None:
-                    df_fisico = df_physical.rename(columns={'Player': 'Correspondencia'})
-                    df_final = pd.merge(
-                        df_final,
-                        df_fisico,
-                        left_on='Player',
-                        right_on='Correspondencia',
-                        how='left'
-                    ).drop(columns=['Correspondencia'])
-                
-                # Adicionar dados de pressão
-                if df_overcome is not None:
-                    df_pressao = df_overcome.rename(columns={'Player': 'Correspondencia'})
-                    df_final = pd.merge(
-                        df_final,
-                        df_pressao,
-                        left_on='Player',
-                        right_on='Correspondencia',
-                        how='left'
-                    ).drop(columns=['Correspondencia'])
-                
-                # Filtrar apenas correspondências confirmadas
-                df_final = df_final[df_final['Player'].isin(st.session_state.correspondencias_confirmadas.keys())]
-                
-                # Gerar link de download
-                st.markdown(gerar_link_download(df_final, 'dados_integrados.xlsx', '⬇️ Baixar Arquivo Consolidado'), unsafe_allow_html=True)
-    
-    except Exception as e:
-        st.error(f"Erro crítico no processamento: {str(e)}")
-        st.stop()
+
+            if overcome_df is not None:
+                overcome_subset = overcome_df[['Player'] + selected_overcome]
+                final_df = pd.merge(
+                    final_df,
+                    overcome_subset,
+                    left_on='Matched_Player',
+                    right_on='Player',
+                    how='left',
+                    suffixes=('', '_Overcome')
+                )
+
+            download = download_link(final_df, 'matched_players.xlsx', '📥 Download Excel File')
+            st.markdown(download, unsafe_allow_html=True)
+
+        st.write("### Rejected Players")
+        if st.session_state.rejected_players:
+            st.write(f"Total rejected: {len(st.session_state.rejected_players)}")
+            if st.button("Show Rejected Players"):
+                st.write(sorted(list(st.session_state.rejected_players)))
 
 else:
-    st.info("ℹ️ Por favor, carregue todos os arquivos necessários para iniciar o processamento.")
-
-# ===================================================
-# SEÇÃO DE DIAGNÓSTICO
-# ===================================================
-
-with st.expander("🔧 Ferramentas de Diagnóstico", expanded=False):
-    if st.button("Exibir Estado Atual"):
-        st.write("Correspondências Confirmadas:", st.session_state.correspondencias_confirmadas)
-        st.write("Jogadores Rejeitados:", st.session_state.jogadores_rejeitados)
-        st.write("Histórico de Ações:", st.session_state.historico_acoes)
-    
-    if st.button("🔄 Reiniciar Sistema", type="primary"):
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
-        st.rerun()
+    st.info("Please upload the WyScout file + at least one SkillCorner file (Physical/Overcome) to begin matching")
